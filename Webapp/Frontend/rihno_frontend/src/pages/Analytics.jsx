@@ -3,6 +3,7 @@ import { Calendar, Cpu, Loader2, Network, HardDrive, Activity, Shield, Users, Za
 import { Cell, Pie, PieChart, Tooltip, RadialBarChart, RadialBar, BarChart, Bar, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from 'react-oidc-context';
+import { backendConfig } from '../authConfig.js';
 import axios from 'axios';
 
 // ─── Formatting Helper ────────────────────────────────────────────────────────
@@ -155,7 +156,7 @@ export default function Analytics() {
     const email = auth.user?.profile?.email || '';
 
     const [loading, setLoading] = useState(true);
-    const [metrics, setMetrics] = useState({});
+    const [m, setM] = useState({});
     const [hovered, setHovered] = useState(null);
     const [error, setError] = useState(null);
 
@@ -165,7 +166,7 @@ export default function Analytics() {
             if (!deviceName || !email) return;
             try {
                 const { data } = await axios.get(`${backendConfig.dealerURL}/metrics/latest_full`, { params: { email, device_name: deviceName } });
-                setMetrics(data);
+                setM(data);
                 setError(null);
             } catch (err) { console.error(err); } finally { setLoading(false); }
         };
