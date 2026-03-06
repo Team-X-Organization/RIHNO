@@ -1,124 +1,134 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from "react-oidc-context";
 import axios from 'axios';
-import { Loader2, MapPin, Cpu, Calendar, Search, Filter, Activity, LineChart } from 'lucide-react';
+import { Loader2, MapPin, Cpu, Calendar, Search, Filter, Activity, BarChart2, HardDrive, Network, Users } from 'lucide-react';
 import { backendConfig } from "../authConfig.js";
-import { PieChart, Pie, Tooltip, Cell } from 'recharts';
+import { PieChart, Pie, Tooltip, Cell, RadialBarChart, RadialBar } from 'recharts';
 import { useNavigate } from "react-router-dom";
 
+// ─── Human-readable formatter ─────────────────────────────────────────────────
+function fmt(v, type = 'pct') {
+    if (v === undefined || v === null || isNaN(v)) return '—';
+    if (type === 'rate') {
+        if (v >= 1e6) return (v / 1e6).toFixed(1) + ' MB/s';
+        if (v >= 1e3) return (v / 1e3).toFixed(1) + ' KB/s';
+        return v.toFixed(0) + ' B/s';
+    }
+    if (type === 'int') return Math.round(v).toLocaleString();
+    return v.toFixed(1) + '%';
+}
+
+const TT_STYLE = { border: '2px solid #000', borderRadius: 0, boxShadow: '4px 4px 0 #000', fontFamily: 'monospace', fontSize: 11 };
+
+// ─── Tiny donut chart ──────────────────────────────────────────────────────── 
+function MiniDonut({ icon: Icon, data, colors, label, sub }) {
+    const isZero = data.every(d => !d.value);
+    const chartData = isZero ? [{ name: 'No Data', value: 1, isEmpty: true }] : data;
+    return (
+        <div className="flex flex-col w-full bg-white border-2 border-black shadow-[4px_4px_0_#000] hover:-translate-y-0.5 hover:-translate-x-0.5 hover:shadow-[6px_6px_0_#000] transition-all group">
+            <div className="flex items-center justify-between px-2 pt-2 pb-1.5 border-b-2 border-black">
+                <span className="font-mono font-black text-[10px] uppercase bg-[#FFECA0] border-2 border-black px-1.5 py-0.5 shadow-[2px_2px_0_#000] truncate max-w-[80%]">{label}</span>
+                {Icon && <Icon size={12} strokeWidth={3} className="text-black" />}
+            </div>
+            <div className="flex flex-col items-center p-2 pt-3 h-full justify-between">
+                <PieChart width={80} height={80}>
+                    <Pie data={chartData} dataKey="value" cx="50%" cy="50%" innerRadius={22} outerRadius={36} stroke="#000" strokeWidth={1}>
+                        {chartData.map((entry, i) => <Cell key={i} fill={entry.isEmpty ? '#f3f4f6' : colors[i % colors.length]} />)}
+                    </Pie>
+                    <Tooltip contentStyle={TT_STYLE} formatter={(v, n, p) => {
+                        if (p.payload && p.payload.isEmpty) return [0, 'No Data'];
+                        const nameStr = String(n || '');
+                        return [v + (nameStr.includes('%') ? '' : ''), nameStr];
+                    }} />
+                </PieChart>
+                <div className="w-full mt-2 font-mono text-[10px] font-black uppercase text-center bg-transparent border-t-2 border-dashed border-gray-300 pt-1">
+                    {sub}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Gauge arc ────────────────────────────────────────────────────────────────
+function MiniGauge({ icon: Icon, value, max, color, label, suffix = '' }) {
+    const pct = Math.min(100, (value / max) * 100);
+    return (
+        <div className="flex flex-col w-full bg-white border-2 border-black shadow-[4px_4px_0_#000] hover:-translate-y-0.5 hover:-translate-x-0.5 hover:shadow-[6px_6px_0_#000] transition-all group">
+            <div className="flex items-center justify-between px-2 pt-2 pb-1.5 border-b-2 border-black">
+                <span className="font-mono font-black text-[10px] uppercase bg-[#FFECA0] border-2 border-black px-1.5 py-0.5 shadow-[2px_2px_0_#000] truncate max-w-[80%]">{label}</span>
+                {Icon && <Icon size={12} strokeWidth={3} className="text-black" />}
+            </div>
+            <div className="flex flex-col items-center p-2 pt-6 h-full justify-between">
+                <RadialBarChart width={90} height={70} cx="50%" cy="80%" innerRadius={30} outerRadius={45}
+                    data={[{ value: pct, fill: color }]} startAngle={180} endAngle={0}>
+                    <RadialBar background dataKey="value" cornerRadius={0} />
+                </RadialBarChart>
+                <p className="font-mono font-black text-[11px] leading-tight break-all uppercase text-center mt-1 border-t-2 border-dashed border-gray-300 w-full pt-1">
+                    {value.toFixed ? value.toFixed(max > 10 ? 0 : 2) : value}{suffix}
+                </p>
+            </div>
+        </div>
+    );
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
 const Agent_List = () => {
     const auth = useAuth();
+    const navigate = useNavigate();
     const [servers, setServers] = useState([]);
     const [loading, setLoading] = useState(true);
-
-    // Filter States
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("All");
+    const [metrics, setMetrics] = useState({});
+    const [expanded, setExpanded] = useState({});
 
-    // State to hold CPU metrics mapped by DeviceName
-    const [cpuMetrics, setCpuMetrics] = useState({});
-
-    // 1. Fetch the list of servers
+    // Fetch agent list
     useEffect(() => {
-        const fetchAgents = async () => {
-            const email = auth.user?.profile?.email;
-            if (!email) return;
-
-            try {
-                setLoading(true);
-                const response = await axios.get(`${backendConfig.backendURL}api/list_all_devices`, {
-                    params: { email: email }
-                });
-                setServers(response.data);
-            } catch (error) {
-                console.error("Error fetching agents:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchAgents();
+        const email = auth.user?.profile?.email;
+        if (!email) return;
+        setLoading(true);
+        axios.get(`${backendConfig.backendURL}api/list_all_devices`, { params: { email } })
+            .then(r => setServers(r.data))
+            .catch(e => console.error(e))
+            .finally(() => setLoading(false));
     }, [auth.user?.profile?.email]);
 
-    // 2. Fetch CPU metrics for each server INDEPENDENTLY, auto-refresh every 10 seconds
+    // Fetch full metrics for each agent, refresh every 10 s
     useEffect(() => {
         const email = auth.user?.profile?.email;
         if (!email || servers.length === 0) return;
 
-        const fetchAllCPU = () => {
-            // Loop through each server and fetch its data without blocking the others
-            servers.forEach(async (server) => {
+        const fetchAll = () => {
+            servers.forEach(async s => {
                 try {
-                    // Matches your exact curl format
-                    const response = await axios.get(`http://localhost:8000/metrics/cpu`, {
-                        params: {
-                            email: email,
-                            device_name: server.DeviceName
-                        }
+                    const { data: d } = await axios.get('http://localhost:8000/metrics/latest_full', {
+                        params: { email, device_name: s.DeviceName }
                     });
-
-                    const rawCpu = response.data.system_cpu || 0;
-
-                    // Round to 2 decimal places for a cleaner UI
-                    const usedCpu = parseFloat(Number(rawCpu).toFixed(2));
-                    const availableCpu = parseFloat((100 - usedCpu).toFixed(2));
-
-                    // Update the state for THIS specific server immediately
-                    setCpuMetrics(prevMetrics => ({
-                        ...prevMetrics,
-                        [server.DeviceName]: {
-                            used: usedCpu,
-                            available: availableCpu
-                        }
-                    }));
-
-                } catch (error) {
-                    console.error(`Error fetching CPU for ${server.DeviceName}:`, error);
-
-                    // If it fails, set it to 0 so the chart handles it gracefully
-                    setCpuMetrics(prevMetrics => ({
-                        ...prevMetrics,
-                        [server.DeviceName]: { used: 0, available: 100 }
-                    }));
+                    setMetrics(prev => ({ ...prev, [s.DeviceName]: d }));
+                } catch {
+                    // keep previous or leave empty
                 }
             });
         };
-
-        // Fetch immediately on load
-        fetchAllCPU();
-
-        // Then auto-refresh every 10 seconds
-        const intervalId = setInterval(fetchAllCPU, 10000);
-
-        // Cleanup on unmount or when servers/email changes
-        return () => clearInterval(intervalId);
-
+        fetchAll();
+        const id = setInterval(fetchAll, 10000);
+        return () => clearInterval(id);
     }, [servers, auth.user?.profile?.email]);
 
+    const filteredServers = servers.filter(s =>
+        s.DeviceName.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        (statusFilter === 'All' || s.Status === statusFilter)
+    );
 
-    // Filtering Logic
-    const filteredServers = servers.filter(server => {
-        const matchesSearch = server.DeviceName.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesStatus = statusFilter === "All" || server.Status === statusFilter;
-        return matchesSearch && matchesStatus;
-    });
-
-    // Pie chart Colors
-    const COLORS_01 = ["#F7B980", "#5A7ACD"];
-    const COLORS_02 = ["#94A378", "#2D3C59"];
-    const COLORS_03 = ["#ACBAC4", "#E1D9BC"];
-
-    // Analytics dashboard route
-    const navigator = useNavigate();
-    function handleNavigate() {
-        navigator('/dashboard/analytics');
+    function goToAnalytics(deviceName) {
+        navigate('/dashboard/analytics', { state: { deviceName } });
         window.scrollTo(0, 0);
     }
 
     return (
         <div className="flex flex-col items-center animate-fade-in w-full p-6 min-h-screen bg-white">
-
-            {/* Header Section */}
-            <div className="mb-25">
+            {/* Header */}
+            <div className="mb-14">
                 <h1 className="text-6xl md:text-8xl font-black uppercase leading-none text-center">
                     AGENT
                     <span className="block md:inline-block bg-[#FFECA0] border-[4px] border-black px-4 ml-0 md:ml-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
@@ -127,26 +137,18 @@ const Agent_List = () => {
                 </h1>
             </div>
 
-            {/* --- FILTER BAR --- */}
-            <div className="w-full max-w-4xl mb-10 flex flex-col md:flex-row gap-4">
+            {/* Filters */}
+            <div className="w-full max-w-5xl mb-10 flex flex-col md:flex-row gap-4">
                 <div className="relative flex-grow">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-black" size={20} />
-                    <input
-                        type="text"
-                        placeholder="SEARCH BY AGENT NAME..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-12 pr-4 py-4 border-4 border-black font-mono font-bold uppercase outline-none focus:bg-yellow-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all"
-                    />
+                    <input type="text" placeholder="SEARCH BY AGENT NAME..." value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        className="w-full pl-12 pr-4 py-4 border-4 border-black font-mono font-bold uppercase outline-none focus:bg-yellow-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all" />
                 </div>
-
                 <div className="relative">
                     <Filter className="absolute left-4 top-1/2 -translate-y-1/2 text-black pointer-events-none" size={20} />
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                        className="appearance-none pl-12 pr-10 py-4 border-4 border-black font-mono font-black uppercase outline-none bg-white cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] focus:bg-[#7EA0FD] focus:text-white transition-all"
-                    >
+                    <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                        className="appearance-none pl-12 pr-10 py-4 border-4 border-black font-mono font-black uppercase outline-none bg-white cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] focus:bg-[#7EA0FD] focus:text-white transition-all">
                         <option value="All">All Status</option>
                         <option value="Online">Online</option>
                         <option value="Maintenance">Maintenance</option>
@@ -155,147 +157,164 @@ const Agent_List = () => {
                 </div>
             </div>
 
-            {/* Main Content Area */}
-            <div className="w-full max-w-4xl">
+            {/* Content */}
+            <div className="w-full max-w-5xl">
                 {loading ? (
                     <div className="flex items-center justify-center gap-4 p-12 border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
                         <Loader2 className="animate-spin" size={32} />
-                        <p className="font-mono text-xl font-black uppercase tracking-widest text-black">Scanning Frequency...</p>
+                        <p className="font-mono text-xl font-black uppercase tracking-widest">Scanning Agents…</p>
                     </div>
                 ) : filteredServers.length > 0 ? (
                     <div className="space-y-6">
                         {filteredServers.map((server, index) => {
+                            const d = metrics[server.DeviceName] || {};
+                            const isExp = expanded[server.DeviceName];
 
-                            // Grab the specific CPU data for this server
-                            const currentCpu = cpuMetrics[server.DeviceName] || { used: 0, available: 100 };
+                            // CPU
+                            const cpuUsed = d.system_cpu || 0;
+                            // Memory
+                            const memUsed = d.system_memory_percent || 0;
+                            // Disk
+                            const diskRate = d.disk_io_rate || 0;
+                            const diskBusy = Math.min(100, diskRate / 5000);
+                            // Network
+                            const txRate = d.net_send_rate || 0;
+                            const rxRate = d.net_recv_rate || 0;
+                            const netTotal = (txRate + rxRate) || 1; // Prevent div by 0
+                            // Connections
+                            const totalConn = d.total_connections || 0;
+                            const estConn = d.established_connections || 0;
 
-                            const data_01 = [
-                                { name: "CPU Available (%)", value: currentCpu.available },
-                                { name: "CPU Used (%)", value: currentCpu.used }
-                            ];
-                            const data_02 = [
-                                { name: "Memory Available", value: 25 },
-                                { name: "Memory Used", value: 75 }
-                            ];
-                            const data_03 = [
-                                { name: "Network Available", value: 40 },
-                                { name: "Network Used", value: 60 }
-                            ];
+                            const statusClasses = server.Status === 'Online'
+                                ? 'bg-[#CEFFBC] text-black'
+                                : server.Status === 'Maintenance'
+                                    ? 'bg-[#7EA0FD] text-white'
+                                    : 'bg-[#FF6B6B] text-white';
 
                             return (
-                                <div
-                                    key={index}
-                                    className="p-6 border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all"
-                                >
-                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                                        <h3 className="text-3xl font-black leading-none text-black">
-                                            {server.DeviceName}
-                                        </h3>
-                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between">
-                                            <span className={'bg-white p-1 text-center font-mono text-[11px] font-bold text-gray-500 uppercase tracking-tight'}>Agent Status: </span>
-                                            <span className={`inline-block px-3 py-1 border-2 border-black text-[10px] font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] text-center w-fit ${
-                                                server.Status === 'Online' ? 'bg-[#CEFFBC] text-black' :
-                                                    server.Status === 'Maintenance' ? 'bg-[#7EA0FD] text-white' : 'bg-[#FF6B6B] text-white'
-                                            }`}>
-                                            {server.Status}
-                                        </span>
+                                <div key={index}
+                                    className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:shadow-[10px_10px_0_rgba(0,0,0,1)] transition-all">
+
+                                    {/* Card header */}
+                                    <div className="p-5 border-b-4 border-black flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`w-3 h-3 rounded-full border-2 border-black ${server.Status === 'Online' ? 'bg-green-400 animate-pulse' : server.Status === 'Maintenance' ? 'bg-blue-400' : 'bg-red-400'}`} />
+                                            <h3 className="text-2xl font-black text-black uppercase">{server.DeviceName}</h3>
+                                            <span className={`inline-block px-3 py-0.5 border-2 border-black text-[10px] font-black uppercase shadow-[3px_3px_0_rgba(0,0,0,1)] ${statusClasses}`}>
+                                                {server.Status}
+                                            </span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => setExpanded(prev => ({ ...prev, [server.DeviceName]: !isExp }))}
+                                                className="font-mono text-xs font-black px-4 py-2 border-2 border-black shadow-[3px_3px_0_#000] hover:-translate-y-0.5 hover:shadow-[4px_4px_0_#000] transition-all uppercase bg-white hover:bg-[#FFECA0]">
+                                                {isExp ? '▲ Collapse' : '▼ Expand'}
+                                            </button>
+                                            <button onClick={() => goToAnalytics(server.DeviceName)}
+                                                className="font-mono text-xs font-black px-4 py-2 border-2 border-black shadow-[3px_3px_0_#000] hover:-translate-y-0.5 hover:shadow-[4px_4px_0_#000] transition-all uppercase bg-white hover:bg-[#CEFFBC] flex items-center gap-1.5">
+                                                <BarChart2 size={13} /> Deep Analytics
+                                            </button>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-6 font-mono text-[11px] font-bold text-gray-500 uppercase tracking-tight mb-5">
-                                        <div className="flex items-center gap-2 border-l-4 border-black pl-3 text-black">
-                                            <MapPin size={16} />
-                                            <span>Location: {server.Location || 'N/A'}</span>
-                                        </div>
-                                        <div className="flex items-center gap-2 border-l-4 border-black pl-3 text-black">
-                                            <Cpu size={16} />
-                                            <span>Device Type: {server.DeviceType || 'N/A'}</span>
-                                        </div>
-                                        <div className="flex items-center gap-2  pt-2 mt-2 border-t border-gray-100 text-black">
-                                            <Calendar size={16} />
-                                            <span>Date Created: {server.DateCreated || 'N/A'}</span>
-                                        </div>
+                                    {/* Meta row */}
+                                    <div className="px-5 py-3 border-b-2 border-black grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 font-mono text-[11px] font-bold text-gray-600 uppercase">
+                                        <div className="flex items-center gap-2"><MapPin size={14} /> {server.Location || 'N/A'}</div>
+                                        <div className="flex items-center gap-2"><Cpu size={14} /> {server.DeviceType || 'N/A'}</div>
+                                        <div className="flex items-center gap-2"><Calendar size={14} /> {server.DateCreated || 'N/A'}</div>
                                     </div>
 
-                                    <hr></hr>
+                                    {/* ── 5 mini charts — always visible ── */}
+                                    <div className="p-4 grid grid-cols-2 md:grid-cols-5 gap-4 border-b-2 border-black bg-gray-50/50 relative">
+                                        <div className="absolute top-0 left-0 w-full h-1 bg-black opacity-10" />
+                                        {/* CPU */}
+                                        <MiniDonut
+                                            icon={Cpu}
+                                            data={[{ name: 'Free', value: +(100 - cpuUsed).toFixed(2) }, { name: 'Used', value: +cpuUsed.toFixed(2) }]}
+                                            colors={['#F7B980', '#5A7ACD']}
+                                            label="CPU"
+                                            sub={fmt(cpuUsed)} />
 
-                                    <div className={"flex flex-col justify-evenly sm:items-center sm:flex-row"}>
-                                        <div className={"flex flex-col items-center pb-3 justify-between"}>
-                                            <PieChart width={250} height={250}>
-                                                <Pie
-                                                    data={data_01}
-                                                    dataKey="value"
-                                                    cx="50%"
-                                                    cy="50%"
-                                                    innerRadius={50}
-                                                    outerRadius="65%"
-                                                    label
-                                                >
-                                                    {data_01.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={COLORS_01[index % COLORS_01.length]} />
-                                                    ))}
-                                                </Pie>
-                                                <Tooltip/>
-                                            </PieChart>
-                                            <h4 className={"font-mono"}>CPU Usage</h4>
-                                        </div>
+                                        {/* Memory */}
+                                        <MiniDonut
+                                            icon={Activity}
+                                            data={[{ name: 'Free', value: +(100 - memUsed).toFixed(2) }, { name: 'Used', value: +memUsed.toFixed(2) }]}
+                                            colors={['#ACBAC4', '#7EA0FD']}
+                                            label="Memory"
+                                            sub={fmt(memUsed)} />
 
-                                        <div className={"flex flex-col items-center pb-3 justify-between"}>
-                                            <PieChart width={250} height={250}>
-                                                <Pie
-                                                    data={data_02}
-                                                    dataKey="value"
-                                                    cx="50%"
-                                                    cy="50%"
-                                                    innerRadius={50}
-                                                    outerRadius="65%"
-                                                    label
-                                                >
-                                                    {data_02.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={COLORS_02[index % COLORS_02.length]} />
-                                                    ))}
-                                                </Pie>
-                                                <Tooltip/>
-                                            </PieChart>
-                                            <h4 className={"font-mono"}>Memory Usage</h4>
-                                        </div>
+                                        {/* Disk */}
+                                        <MiniDonut
+                                            icon={HardDrive}
+                                            data={[{ name: 'Idle', value: +(100 - diskBusy).toFixed(2) }, { name: 'Active', value: +diskBusy.toFixed(2) }]}
+                                            colors={['#eebdff', '#ad4be0']}
+                                            label="Disk"
+                                            sub={fmt(diskRate, 'rate')} />
 
-                                        <div className={"flex flex-col items-center pb-3 justify-between"}>
-                                            <PieChart width={250} height={250}>
-                                                <Pie
-                                                    data={data_03}
-                                                    dataKey="value"
-                                                    cx="50%"
-                                                    cy="50%"
-                                                    innerRadius={50}
-                                                    outerRadius="65%"
-                                                    label
-                                                >
-                                                    {data_03.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={COLORS_03[index % COLORS_03.length]} />
-                                                    ))}
-                                                </Pie>
-                                                <Tooltip/>
-                                            </PieChart>
-                                            <h4 className={"font-mono"}>Network Usage</h4>
-                                        </div>
+                                        {/* Network TX/RX */}
+                                        <MiniDonut
+                                            icon={Network}
+                                            data={[{ name: 'TX', value: txRate }, { name: 'RX', value: rxRate }]}
+                                            colors={['#69cc45', '#3b62d4']}
+                                            label="Network"
+                                            sub={fmt(txRate + rxRate, 'rate')} />
+
+                                        {/* Connections */}
+                                        <MiniDonut
+                                            icon={Users}
+                                            data={[{ name: 'Established', value: estConn }, { name: 'Other', value: Math.max(0, totalConn - estConn) }]}
+                                            colors={['#4ecdc4', '#1da098']}
+                                            label="Connections"
+                                            sub={fmt(totalConn, 'int')} />
                                     </div>
 
-                                    <hr></hr>
+                                    {/* ── Expanded detail section ── */}
+                                    {isExp && (
+                                        <div className="p-5 bg-white">
+                                            <h4 className="font-mono font-black uppercase text-xs text-gray-400 mb-4 border-b-2 border-black pb-2">Extended Metrics</h4>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                                {/* Swap */}
+                                                <MiniDonut
+                                                    data={[{ name: 'Free', value: +(100 - (d.swap_used_percent || 0)).toFixed(2) }, { name: 'Used', value: +(d.swap_used_percent || 0).toFixed(2) }]}
+                                                    colors={['#BBE0EF', '#FF7DB0']} label="Swap" sub={fmt(d.swap_used_percent || 0)} />
 
-                                    {/* View More Analytics Button */}
-                                    <div className={"flex flex-col mt-5 bg-white font-mono border-1 hover:border-0 rounded-4xl"}>
-                                        <button
-                                            className={"flex flex-row justify-center border-2 p-1 uppercase duration-200 ease-in-out bg-transparent text-black border-transparent hover:bg-[#EA7B7B] hover:text-white hover:border-black hover:-translate-y-1 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:rounded-4xl"}
-                                            onClick={() => {
-                                                handleNavigate()
-                                            }}
-                                        >
-                                            <LineChart size={24} />
-                                            <span className={"mx-3"}></span>
-                                            View More Analytics
-                                        </button>
-                                    </div>
+                                                {/* Process count */}
+                                                <MiniDonut
+                                                    data={[{ name: 'Headroom', value: Math.max(0, 500 - (d.process_count || 0)) }, { name: 'Running', value: d.process_count || 0 }]}
+                                                    colors={['#ebedf0', '#fbbf24']} label="Processes" sub={fmt(d.process_count || 0, 'int')} />
+
+                                                {/* Disk read vs write rate */}
+                                                <MiniDonut
+                                                    data={[{ name: 'Read', value: d.disk_read_rate || 0 }, { name: 'Write', value: d.disk_write_rate || 0 }]}
+                                                    colors={['#f59e0b', '#ef4444']} label="Disk R/W" sub={`${fmt(d.disk_read_rate || 0, 'rate')} / ${fmt(d.disk_write_rate || 0, 'rate')}`} />
+
+                                                {/* TX vs RX bytes cumulative */}
+                                                <MiniDonut
+                                                    data={[{ name: 'Sent', value: d.net_bytes_sent || 0 }, { name: 'Recv', value: d.net_bytes_recv || 0 }]}
+                                                    colors={['#22d3ee', '#0284c7']} label="Net Bytes" sub="TX vs RX" />
+
+                                                {/* Bandwidth asymmetry */}
+                                                <MiniGauge value={d.bandwidth_asymmetry || 0} max={1} color="#a3e635" label="Bw Asym." />
+                                            </div>
+
+                                            {/* Quick stat pills */}
+                                            <div className="mt-5 flex flex-wrap gap-2">
+                                                {[
+                                                    { label: 'Threads', val: fmt(d.total_threads || 0, 'int') },
+                                                    { label: 'Zombies', val: fmt(d.zombie_process_count || 0, 'int') },
+                                                    { label: 'Suspicious Procs', val: fmt(d.suspicious_process_names || 0, 'int') },
+                                                    { label: 'Unique IPs', val: fmt(d.unique_source_ips || 0, 'int') },
+                                                    { label: 'Established Conns', val: fmt(d.established_connections || 0, 'int') },
+                                                    { label: 'CPU Spike', val: fmt(Math.abs(d.cpu_usage_spike || 0)) },
+                                                    { label: 'Mem Spike', val: fmt(Math.abs(d.memory_usage_spike || 0)) },
+                                                ].map(s => (
+                                                    <div key={s.label} className="flex items-center border-2 border-black shadow-[2px_2px_0_#000]">
+                                                        <span className="font-mono text-xs font-black uppercase px-2 py-1 bg-[#FFECA0] border-r-2 border-black">{s.label}</span>
+                                                        <span className="font-mono text-xs font-bold px-3 py-1 bg-white">{s.val}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}
@@ -304,10 +323,8 @@ const Agent_List = () => {
                     <div className="p-16 border-4 border-black bg-white shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] text-center">
                         <Activity className="mx-auto mb-4 opacity-10 text-black" size={80} />
                         <p className="font-black uppercase text-2xl text-gray-300 italic">No Matching Nodes Found</p>
-                        <button
-                            onClick={() => {setSearchTerm(""); setStatusFilter("All");}}
-                            className="mt-4 font-mono text-xs font-black underline uppercase hover:text-[#7EA0FD]"
-                        >
+                        <button onClick={() => { setSearchTerm(""); setStatusFilter("All"); }}
+                            className="mt-4 font-mono text-xs font-black underline uppercase hover:text-[#7EA0FD]">
                             Reset Filters
                         </button>
                     </div>
@@ -315,6 +332,6 @@ const Agent_List = () => {
             </div>
         </div>
     );
-}
+};
 
 export default Agent_List;
