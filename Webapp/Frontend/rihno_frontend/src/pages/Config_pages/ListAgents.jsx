@@ -104,10 +104,9 @@ function ListAgents() {
                             <div className="mb-4 md:mb-0">
                                 <div className="flex items-center gap-3 mb-3">
                                     <h3 className="text-2xl font-black leading-none text-black">{server.DeviceName}</h3>
-                                    <span className={`px-3 py-1 border-2 border-black text-[10px] font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${
-                                        server.Status === 'Online' ? 'bg-[#CEFFBC] text-black' :
+                                    <span className={`px-3 py-1 border-2 border-black text-[10px] font-black uppercase shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] ${server.Status === 'Online' ? 'bg-[#CEFFBC] text-black' :
                                             server.Status === 'Maintenance' ? 'bg-[#7EA0FD] text-white' : 'bg-[#FF6B6B] text-white'
-                                    }`}>
+                                        }`}>
                                         {server.Status}
                                     </span>
                                 </div>
@@ -120,9 +119,8 @@ function ListAgents() {
                             <div className="flex items-center gap-4 border-t-2 border-black md:border-none pt-4 md:pt-0">
                                 <button
                                     onClick={() => handleCopy(server.DeviceAPI, index)}
-                                    className={`flex items-center gap-2 px-6 py-3 border-2 border-black font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-1 active:translate-y-1 transition-all ${
-                                        copiedId === index ? 'bg-[#CEFFBC] text-black' : 'bg-[#FFECA0] text-black hover:bg-black hover:text-white'
-                                    }`}
+                                    className={`flex items-center gap-2 px-6 py-3 border-2 border-black font-black uppercase text-sm shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-1 active:translate-y-1 transition-all ${copiedId === index ? 'bg-[#CEFFBC] text-black' : 'bg-[#FFECA0] text-black hover:bg-black hover:text-white'
+                                        }`}
                                 >
                                     {copiedId === index ? (
                                         <><CheckCircle2 size={18} /> Copied</>

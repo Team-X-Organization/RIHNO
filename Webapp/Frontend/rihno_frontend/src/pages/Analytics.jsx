@@ -155,18 +155,21 @@ export default function Analytics() {
     const email = auth.user?.profile?.email || '';
 
     const [loading, setLoading] = useState(true);
-    const [m, setM] = useState({});
+    const [metrics, setMetrics] = useState({});
     const [hovered, setHovered] = useState(null);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
         if (!email || !deviceName) { setLoading(false); return; }
-        const load = async () => {
+        const fetchMetrics = async () => {
+            if (!deviceName || !email) return;
             try {
-                const { data } = await axios.get('http://localhost:8000/metrics/latest_full', { params: { email, device_name: deviceName } });
-                setM(data);
-            } catch (e) { console.error(e); } finally { setLoading(false); }
+                const { data } = await axios.get(`${backendConfig.dealerURL}/metrics/latest_full`, { params: { email, device_name: deviceName } });
+                setMetrics(data);
+                setError(null);
+            } catch (err) { console.error(err); } finally { setLoading(false); }
         };
-        load(); const id = setInterval(load, 10000); return () => clearInterval(id);
+        fetchMetrics(); const id = setInterval(fetchMetrics, 10000); return () => clearInterval(id);
     }, [email, deviceName]);
 
     if (!deviceName) return (

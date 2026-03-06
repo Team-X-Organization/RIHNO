@@ -81,6 +81,27 @@ const Agent_List = () => {
     const [statusFilter, setStatusFilter] = useState("All");
     const [metrics, setMetrics] = useState({});
     const [expanded, setExpanded] = useState({});
+    const [agentStatuses, setAgentStatuses] = useState({});
+
+    // Fetch dynamic agent statuses every 10s
+    useEffect(() => {
+        const email = auth.user?.profile?.email;
+        if (!email) return;
+
+        const fetchStatuses = async () => {
+            try {
+                const { data } = await axios.get(`${backendConfig.dealerURL}/agents/status`, { params: { email } });
+                const statusMap = {};
+                if (data) {
+                    data.forEach(s => statusMap[s.agent_name] = s);
+                }
+                setAgentStatuses(statusMap);
+            } catch (err) { }
+        };
+        fetchStatuses();
+        const id = setInterval(fetchStatuses, 10000);
+        return () => clearInterval(id);
+    }, [auth.user?.profile?.email]);
 
     // Fetch agent list
     useEffect(() => {
@@ -101,7 +122,7 @@ const Agent_List = () => {
         const fetchAll = () => {
             servers.forEach(async s => {
                 try {
-                    const { data: d } = await axios.get('http://localhost:8000/metrics/latest_full', {
+                    const { data: d } = await axios.get(`${backendConfig.dealerURL}/metrics/latest_full`, {
                         params: { email, device_name: s.DeviceName }
                     });
                     setMetrics(prev => ({ ...prev, [s.DeviceName]: d }));
@@ -115,9 +136,18 @@ const Agent_List = () => {
         return () => clearInterval(id);
     }, [servers, auth.user?.profile?.email]);
 
-    const filteredServers = servers.filter(s =>
+    const enrichedServers = servers.map(server => {
+        let displayStatus = server.Status;
+        if (displayStatus !== 'Maintenance') {
+            const dynamicStatus = agentStatuses[server.DeviceName];
+            displayStatus = (dynamicStatus && dynamicStatus.is_active) ? 'Online' : 'Offline';
+        }
+        return { ...server, DisplayStatus: displayStatus };
+    });
+
+    const filteredServers = enrichedServers.filter(s =>
         s.DeviceName.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        (statusFilter === 'All' || s.Status === statusFilter)
+        (statusFilter === 'All' || s.DisplayStatus === statusFilter)
     );
 
     function goToAnalytics(deviceName) {
@@ -185,9 +215,9 @@ const Agent_List = () => {
                             const totalConn = d.total_connections || 0;
                             const estConn = d.established_connections || 0;
 
-                            const statusClasses = server.Status === 'Online'
+                            const statusClasses = server.DisplayStatus === 'Online'
                                 ? 'bg-[#CEFFBC] text-black'
-                                : server.Status === 'Maintenance'
+                                : server.DisplayStatus === 'Maintenance'
                                     ? 'bg-[#7EA0FD] text-white'
                                     : 'bg-[#FF6B6B] text-white';
 
@@ -198,10 +228,13 @@ const Agent_List = () => {
                                     {/* Card header */}
                                     <div className="p-5 border-b-4 border-black flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                         <div className="flex items-center gap-4">
-                                            <div className={`w-3 h-3 rounded-full border-2 border-black ${server.Status === 'Online' ? 'bg-green-400 animate-pulse' : server.Status === 'Maintenance' ? 'bg-blue-400' : 'bg-red-400'}`} />
-                                            <h3 className="text-2xl font-black text-black uppercase">{server.DeviceName}</h3>
-                                            <span className={`inline-block px-3 py-0.5 border-2 border-black text-[10px] font-black uppercase shadow-[3px_3px_0_rgba(0,0,0,1)] ${statusClasses}`}>
-                                                {server.Status}
+                                            <div className={`w-3 h-3 rounded-full border-2 border-black ${server.DisplayStatus === 'Online' ? 'bg-green-400 animate-pulse' : server.DisplayStatus === 'Maintenance' ? 'bg-blue-400' : 'bg-red-400'}`} />
+                                            <div>
+                                                <h3 className="text-3xl font-black text-black uppercase leading-none">{server.DeviceName}</h3>
+                                                <p className="font-mono text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">ID: {server.DeviceType}</p>
+                                            </div>
+                                            <span className={`inline-block px-3 py-1 border-2 border-black text-[10px] font-black uppercase shadow-[3px_3px_0_rgba(0,0,0,1)] ml-2 ${statusClasses}`}>
+                                                {server.DisplayStatus}
                                             </span>
                                         </div>
                                         <div className="flex gap-2">

@@ -50,7 +50,7 @@ app.get('/api/cli_auth', async (req, res) => {
         }
 
         const response = await axios.get(AWS_API_CLI_AUTH_URL, {
-            params: { email: email, device_name: device_name, device_type:device_type, api_key: api_key },
+            params: { email: email, device_name: device_name, device_type: device_type, api_key: api_key },
         });
 
         res.status(200).json(response.data);
@@ -68,9 +68,10 @@ app.get('/api/cli_auth', async (req, res) => {
 // IMPORTANT: This middleware is required to parse JSON bodies
 app.use(express.json());
 
+const kafkaBroker = process.env.KAFKA_BROKER || 'localhost:9092';
 const kafka = new Kafka({
     clientId: 'my-app',
-    brokers: ['localhost:9092'] // Replace with your broker address
+    brokers: [kafkaBroker] // Replaced with env variable
 });
 
 const producer = kafka.producer();
@@ -165,7 +166,7 @@ app.delete('/api/delete', async (req, res) => {
         }
 
         const response = await axios.delete(AWS_API_URL, {
-            params: { email: email , device: device },
+            params: { email: email, device: device },
         })
 
         res.status(200).json(response.data);

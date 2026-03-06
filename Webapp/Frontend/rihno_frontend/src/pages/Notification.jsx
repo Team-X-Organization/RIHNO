@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from "react-oidc-context";
+import { backendConfig } from "../../authConfig.js";
 import { Loader2, AlertTriangle, AlertOctagon, Info, Clock, AlertCircle } from 'lucide-react';
 
 function Notification() {
@@ -16,7 +17,7 @@ function Notification() {
 
         const fetchAlerts = async () => {
             try {
-                const { data } = await axios.get('http://localhost:8000/alerts/recent', {
+                const { data } = await axios.get(`${backendConfig.dealerURL}/alerts/recent`, {
                     params: { email, limit: 50 }
                 });
                 setAlerts(data || []);

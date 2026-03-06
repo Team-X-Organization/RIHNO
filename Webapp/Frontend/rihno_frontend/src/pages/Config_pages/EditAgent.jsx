@@ -160,10 +160,9 @@ function EditAgent() {
                                             <p className="font-mono text-[10px] uppercase font-bold text-gray-400">Identity</p>
                                             <p className="text-xl font-black uppercase truncate max-w-[180px]">{dev.DeviceName}</p>
                                         </div>
-                                        <span className={`px-2 py-1 border-2 border-black text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ${
-                                            dev.Status === 'Online' ? 'bg-[#CEFFBC]' :
+                                        <span className={`px-2 py-1 border-2 border-black text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ${dev.Status === 'Online' ? 'bg-[#CEFFBC]' :
                                                 dev.Status === 'Maintenance' ? 'bg-[#7EA0FD] text-white' : 'bg-[#FF6B6B] text-white'
-                                        }`}>
+                                            }`}>
                                             {dev.Status}
                                         </span>
                                     </div>
@@ -237,9 +236,8 @@ function EditAgent() {
                         </form>
 
                         {status.message && (
-                            <div className={`mt-8 p-6 border-4 border-black font-black uppercase flex items-center gap-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] ${
-                                status.type === 'success' ? 'bg-[#CEFFBC] text-black' : 'bg-[#FF6B6B] text-white'
-                            }`}>
+                            <div className={`mt-8 p-6 border-4 border-black font-black uppercase flex items-center gap-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] ${status.type === 'success' ? 'bg-[#CEFFBC] text-black' : 'bg-[#FF6B6B] text-white'
+                                }`}>
                                 {status.type === 'success' ? <CheckCircle2 size={32} /> : <AlertCircle size={32} />}
                                 <span className="text-lg">{status.message}</span>
                             </div>

@@ -5,7 +5,8 @@ import {
     ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { useAuth } from 'react-oidc-context';
-import { useLocation, Link } from 'react-router-dom';
+import { backendConfig } from "../../authConfig.js";
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Loader2, ArrowLeft, CalendarDays, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
@@ -309,7 +310,7 @@ function MetricTimestampView() {
             } else {
                 params.time_range = timeRange;
             }
-            const res = await axios.get('http://localhost:8000/metrics/history', { params });
+            const res = await axios.get(`${backendConfig.dealerURL}/metrics/history`, { params });
             setData(Array.isArray(res.data) ? res.data : []);
         } catch (e) {
             setError('Failed to fetch data from server.');
