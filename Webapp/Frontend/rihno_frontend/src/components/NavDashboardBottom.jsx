@@ -15,8 +15,8 @@ function NavDashboardBottom() {
 
                 {/* Core Section */}
                 <DockIcon to="/dashboard/servers" icon={<Server size={24} />} label="Agents" />
-                <DockIcon to="/dashboard/data" icon={<Database size={24} />} label="Data" />
-                <DockIcon to="/dashboard/activity" icon={<Activity size={24} />} label="Activity" />
+                {/* <DockIcon to="/dashboard/data" icon={<Database size={24} />} label="Data" />
+                <DockIcon to="/dashboard/activity" icon={<Activity size={24} />} label="Activity" /> */}
 
                 <Separator />
 
