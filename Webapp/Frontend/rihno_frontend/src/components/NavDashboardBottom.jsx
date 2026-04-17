@@ -8,10 +8,10 @@ import {
 function NavDashboardBottom() {
     return (
         <nav
-            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 w-max max-w-[95vw]"
+            className="fixed bottom-4 md:bottom-8 left-1/2 -translate-x-1/2 z-50 w-max max-w-[95vw] sm:max-w-none"
             aria-label="Dashboard Navigation"
         >
-            <div className="flex items-center gap-1 md:gap-2 px-3 py-2 bg-white border-[3px] border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+            <div className="flex items-center gap-1 md:gap-2 px-1 py-1 md:px-3 md:py-2 bg-white border-[3px] md:border-[4px] border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] md:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] overflow-x-auto" style={{scrollbarWidth: 'none'}}>
 
                 {/* Core Section */}
                 <DockIcon to="/dashboard/servers" icon={<Server size={24} />} label="Agents" />

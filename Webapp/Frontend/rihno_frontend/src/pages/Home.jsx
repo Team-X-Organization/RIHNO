@@ -1,4 +1,4 @@
-import React, {Suspense, useEffect, useState} from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { Environment, ScrollControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import Model from "../components/Model.jsx";
@@ -14,8 +14,8 @@ function Home() {
     useEffect(() => {
         // call express js api using axios
         axios.get(`${backendConfig.backendURL}api/backend_check`)
-            .then(response => {setData(response.data.message);})
-            .catch(error => {console.error("There was an error fetching the data!", error);})
+            .then(response => { setData(response.data.message); })
+            .catch(error => { console.error("There was an error fetching the data!", error); })
     }, []);
 
     // Return the Home page
@@ -41,17 +41,24 @@ function Home() {
                         Real-time monitoring, intelligent threat analysis.
                     </p>
 
-                    <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex flex-col md:flex-row gap-4 flex-wrap">
                         <Link
                             to="/dashboard"
-                            className="flex justify-center items-center gap-2 bg-[#CEFFBC] text-black border-[3px] border-black px-6 py-3 md:px-8 md:py-4 font-black uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all"
+                            className="flex justify-center flex-1 md:flex-none items-center gap-2 bg-[#CEFFBC] text-black border-[3px] border-black px-6 py-3 md:px-8 md:py-4 font-black uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all"
                         >
                             Get Started <ArrowRight size={20} />
                         </Link>
 
                         <Link
+                            to="/documentation#cli"
+                            className="flex justify-center flex-1 md:flex-none items-center gap-2 bg-black text-white border-[3px] border-black px-6 py-3 md:px-8 md:py-4 font-black uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all"
+                        >
+                            Install CLI
+                        </Link>
+
+                        <Link
                             to="/documentation"
-                            className="flex justify-center items-center gap-2 bg-[#7EA0FD] text-black border-[3px] border-black px-6 py-3 md:px-8 md:py-4 font-black uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all"
+                            className="flex justify-center flex-1 md:flex-none items-center gap-2 bg-[#7EA0FD] text-black border-[3px] border-black px-6 py-3 md:px-8 md:py-4 font-black uppercase shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all"
                         >
                             Documentation
                         </Link>
@@ -59,10 +66,10 @@ function Home() {
 
                     <div className="mt-8 md:mt-12 flex flex-wrap gap-4 md:gap-8 text-sm font-bold text-gray-500">
                         <div className="flex items-center gap-2">
-                            <ShieldCheck size={18} className="text-black"/> 99.9% Uptime
+                            <ShieldCheck size={18} className="text-black" /> 99.9% Uptime
                         </div>
                         <div className="flex items-center gap-2">
-                            <Zap size={18} className="text-black"/> &lt; 10ms Latency
+                            <Zap size={18} className="text-black" /> &lt; 10ms Latency
                         </div>
                     </div>
                 </div>

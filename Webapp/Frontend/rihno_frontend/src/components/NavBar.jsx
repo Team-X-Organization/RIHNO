@@ -20,8 +20,8 @@ function NavBar() {
     };
 
     return (
-        <div className="w-full max-w-10xl mx-auto relative z-50 p-4">
-            <nav className="flex items-center justify-between border-[4px] md:border-[6px] border-black p-2 md:p-3 bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] md:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+        <div className="w-full max-w-7xl mx-auto relative z-50 p-2 md:p-4">
+            <nav className="flex items-center justify-between border-[3px] md:border-[6px] border-black p-2 md:p-3 bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] md:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
 
                 {/* Logo Section */}
                 <div className="flex items-center gap-2">

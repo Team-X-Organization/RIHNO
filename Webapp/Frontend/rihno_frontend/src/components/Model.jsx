@@ -1,27 +1,40 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef, useState, useEffect } from 'react';
 import { useLoader, useThree, useFrame } from '@react-three/fiber';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
-import { PresentationControls, useScroll } from '@react-three/drei'; // Added useScroll
+import { PresentationControls, useScroll } from '@react-three/drei';
 import * as THREE from 'three';
 
 const Model = () => {
     const obj = useLoader(OBJLoader, '/rihno.obj');
-    const scroll = useScroll(); // Access scroll data
+    const scroll = useScroll();
     const modelRef = useRef();
+    
+    // Add mobile detection
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     useFrame(() => {
-        // r1 is a value from 0 to 1 based on scroll progress
         const r1 = scroll.range(0, 1);
 
         if (modelRef.current) {
-            // SCROLL UP (r1 = 0): Position is [0, 0, 0]
-            // SCROLL DOWN (r1 = 1): Change axis values here
-            // Example: Move to X: 2, Y: -1, Z: -3 as user scrolls down
-            modelRef.current.position.x = THREE.MathUtils.lerp(2, 1.3, r1);
-            modelRef.current.position.y = THREE.MathUtils.lerp(0.2, 0.2, r1);
-            modelRef.current.position.z = THREE.MathUtils.lerp(0.5, 0.5, r1);
+            if (isMobile) {
+                // Mobile layout - shift down and somewhat centered
+                modelRef.current.position.x = THREE.MathUtils.lerp(0.2, 0, r1);
+                modelRef.current.position.y = THREE.MathUtils.lerp(-1.0, -1.2, r1);
+                modelRef.current.position.z = THREE.MathUtils.lerp(0.5, 0.5, r1);
+            } else {
+                // Desktop layout - original placements
+                modelRef.current.position.x = THREE.MathUtils.lerp(2, 1.3, r1);
+                modelRef.current.position.y = THREE.MathUtils.lerp(0.2, 0.2, r1);
+                modelRef.current.position.z = THREE.MathUtils.lerp(0.5, 0.5, r1);
+            }
 
-            // Optional: Rotate while scrolling
+            // Shared rotation
             modelRef.current.rotation.y = THREE.MathUtils.lerp(0, Math.PI / 2, r1);
         }
     });
@@ -48,7 +61,7 @@ const Model = () => {
             <group ref={modelRef}>
                 <primitive
                     object={obj}
-                    scale={2} // Using fixed scale for clarity during movement
+                    scale={isMobile ? 1.4 : 2} // Scale down on mobile
                 />
             </group>
         </PresentationControls>
