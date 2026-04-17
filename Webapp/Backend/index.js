@@ -301,4 +301,46 @@ app.patch('/api/update', async (req, res) => {
     }
 });
 
+// Get IP Threats route
+app.get('/api/ip_threats', async (req, res) => {
+    try {
+        const { email } = req.query;
+
+        if (!email) {
+            return res.status(400).json({ status: 'error', message: 'Email is required' });
+        }
+
+        // Default to the Flask app's local address, but allow override via .env
+        const THREAT_API_URL = process.env.THREAT_API_URL || 'http://host.docker.internal:8888/api/scans';
+
+        // 1. Fetch the global state from your Python Flask service
+        const response = await axios.get(THREAT_API_URL);
+
+        // 2. Safely extract the data array
+        const allScans = response.data.data || [];
+
+        // 3. Filter the results for the requested email
+        const userScans = allScans.filter(scan => scan.email === email);
+
+        // 4. Calculate the total threats specifically for this user
+        const userThreatCount = userScans.reduce((sum, scan) => sum + scan.threat_count, 0);
+
+        // 5. Return the filtered data
+        res.status(200).json({
+            status: 'success',
+            user_email: email,
+            total_user_threats: userThreatCount,
+            data: userScans
+        });
+
+    } catch (error) {
+        console.error("Threat API Fetch Error:", error.response?.data || error.message);
+        res.status(error.response?.status || 500).json({
+            status: 'error',
+            message: 'Failed to fetch threat data from the analysis service',
+            details: error.message
+        });
+    }
+});
+
 app.listen(PORT, '0.0.0.0', () => console.log(`RIHNO backend started on http://localhost:${PORT}`));
