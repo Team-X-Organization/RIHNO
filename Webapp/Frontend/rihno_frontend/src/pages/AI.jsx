@@ -268,51 +268,51 @@ function Ai() {
     };
 
     return (
-        <div className="flex flex-col items-center animate-fade-in w-full min-h-[calc(100vh-80px)] bg-white font-sans text-black p-6">
-            <div className="w-full max-w-6xl mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                <div className="flex items-center gap-4">
-                    <h1 className="text-5xl md:text-7xl font-black uppercase leading-none">
-                        AI <span className="inline-block bg-[#FFECA0] border-4 border-black px-4 shadow-[8px_8px_0_#000]">ANALYST</span>
+        <div className="flex flex-col items-center animate-fade-in w-full min-h-[calc(100vh-80px)] bg-white font-sans text-black p-3 sm:p-4 md:p-6">
+            <div className="w-full max-w-6xl xl:max-w-[1500px] mb-6 sm:mb-8 md:mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-5 md:gap-6">
+                <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                    <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-black uppercase leading-none">
+                        AI <span className="inline-block bg-[#FFECA0] border-[3px] sm:border-4 border-black px-2 sm:px-3 md:px-4 shadow-[4px_4px_0_#000] sm:shadow-[6px_6px_0_#000] md:shadow-[8px_8px_0_#000]">ANALYST</span>
                     </h1>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 md:gap-4 w-full md:w-auto">
                     {email && (
-                        <div className="flex items-center gap-2 font-mono font-black uppercase text-xs px-4 py-2 border-4 border-black bg-white shadow-[4px_4px_0_#000] truncate max-w-[200px]" title={email}>
-                            <span className="w-3 h-3 border-2 border-black bg-[#CEFFBC] flex-shrink-0" />
+                        <div className="flex items-center gap-2 font-mono font-black uppercase text-[10px] sm:text-xs px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 border-[3px] sm:border-4 border-black bg-white shadow-[3px_3px_0_#000] sm:shadow-[4px_4px_0_#000] truncate max-w-[140px] sm:max-w-[200px] lg:max-w-[260px]" title={email}>
+                            <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 border-2 border-black bg-[#CEFFBC] flex-shrink-0" />
                             <span className="truncate">{email}</span>
                         </div>
                     )}
 
                     <button
-                        className={`flex items-center gap-2 font-mono font-black uppercase text-xs px-4 py-2 border-4 border-black shadow-[4px_4px_0_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0_#000] transition-all
+                        className={`flex items-center gap-1.5 sm:gap-2 font-mono font-black uppercase text-[10px] sm:text-xs px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 border-[3px] sm:border-4 border-black shadow-[3px_3px_0_#000] sm:shadow-[4px_4px_0_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0_#000] transition-all
                             ${apiStatus === 'online' ? 'bg-[#CEFFBC] text-black' : apiStatus === 'offline' ? 'bg-[#FF6B6B] text-white' : 'bg-white text-black'}`}
                         title="MCP Server status — click to refresh"
                         onClick={checkStatus}
                     >
-                        {apiStatus === 'online' ? <Wifi className="w-4 h-4" /> : apiStatus === 'offline' ? <WifiOff className="w-4 h-4" /> : <Loader2 className="w-4 h-4 animate-spin" />}
+                        {apiStatus === 'online' ? <Wifi className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : apiStatus === 'offline' ? <WifiOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />}
                         <span>MCP {apiStatus === 'checking' ? '...' : apiStatus}</span>
                     </button>
 
                     <div className="relative z-50">
                         <button
                             onClick={() => { setIsModelOpen(!isModelOpen); setIsDocsOpen(false); }}
-                            className={`flex items-center gap-2 font-mono font-black uppercase text-xs px-4 py-2 border-4 border-black shadow-[4px_4px_0_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0_#000] transition-all 
+                            className={`flex items-center gap-1.5 sm:gap-2 font-mono font-black uppercase text-[10px] sm:text-xs px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 border-[3px] sm:border-4 border-black shadow-[3px_3px_0_#000] sm:shadow-[4px_4px_0_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0_#000] transition-all
                                 ${isModelOpen ? 'bg-black text-[#FFECA0]' : 'bg-[#FFECA0] text-black'}`}
                         >
-                            <Cpu className="w-4 h-4" />
-                            <span className="max-w-[120px] truncate">
+                            <Cpu className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            <span className="max-w-[80px] sm:max-w-[120px] truncate">
                                 {KNOWN_MODELS.find(m => m.alias === selectedModel)?.label || selectedModel}
                             </span>
-                            <ChevronDown className="w-4 h-4" />
+                            <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         </button>
 
                         {isModelOpen && (
-                            <div className="absolute right-0 top-full mt-2 w-64 bg-white border-4 border-black shadow-[8px_8px_0_#000] overflow-hidden">
-                                <div className="px-4 py-3 bg-black text-[#FFECA0] border-b-4 border-black">
-                                    <span className="font-mono text-xs font-black uppercase">Select Model</span>
+                            <div className="absolute right-0 top-full mt-2 w-56 sm:w-64 bg-white border-[3px] sm:border-4 border-black shadow-[6px_6px_0_#000] sm:shadow-[8px_8px_0_#000] overflow-hidden">
+                                <div className="px-3 sm:px-4 py-2 sm:py-3 bg-black text-[#FFECA0] border-b-[3px] sm:border-b-4 border-black">
+                                    <span className="font-mono text-[10px] sm:text-xs font-black uppercase">Select Model</span>
                                     {serverModel && (
-                                        <div className="font-mono text-[10px] text-[#CEFFBC] mt-1 truncate" title={serverModel}>
+                                        <div className="font-mono text-[9px] sm:text-[10px] text-[#CEFFBC] mt-1 truncate" title={serverModel}>
                                             Host: {serverModel.split('.').pop()}
                                         </div>
                                     )}
@@ -322,11 +322,11 @@ function Ai() {
                                         <button
                                             key={m.alias}
                                             onClick={() => { setSelectedModel(m.alias); setIsModelOpen(false); setMessages([]); messagesRef.current = []; }}
-                                            className={`w-full text-left px-4 py-3 font-mono font-bold text-sm uppercase flex items-center justify-between border-b-2 border-black hover:bg-[#CEFFBC] transition-colors
+                                            className={`w-full text-left px-3 sm:px-4 py-2 sm:py-3 font-mono font-bold text-xs sm:text-sm uppercase flex items-center justify-between border-b-2 border-black hover:bg-[#CEFFBC] transition-colors
                                                 ${selectedModel === m.alias ? 'bg-[#FFECA0]' : 'bg-white text-black'}`}
                                         >
                                             <span>{m.label}</span>
-                                            {selectedModel === m.alias && <span className="w-3 h-3 border-2 border-black bg-black" />}
+                                            {selectedModel === m.alias && <span className="w-3 h-3 border-2 border-black bg-black flex-shrink-0" />}
                                         </button>
                                     ))}
                                 </div>
@@ -336,12 +336,12 @@ function Ai() {
 
                     <button
                         onClick={() => { setIsDocsOpen(!isDocsOpen); setIsModelOpen(false); }}
-                        className={`flex items-center gap-2 font-mono font-black uppercase text-xs px-4 py-2 border-4 border-black shadow-[4px_4px_0_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0_#000] transition-all
+                        className={`flex items-center gap-1.5 sm:gap-2 font-mono font-black uppercase text-[10px] sm:text-xs px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 border-[3px] sm:border-4 border-black shadow-[3px_3px_0_#000] sm:shadow-[4px_4px_0_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0_#000] transition-all
                             ${isDocsOpen ? 'bg-black text-white' : 'bg-white text-black'}`}
                     >
-                        <BookOpen className="w-4 h-4" />
+                        <BookOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         <span>Tools</span>
-                        <span className="border-2 border-black bg-[#FF6B6B] text-white px-1.5 py-0.5">
+                        <span className="border-2 border-black bg-[#FF6B6B] text-white px-1 sm:px-1.5 py-0.5">
                             {bedrockTools.length}
                         </span>
                     </button>

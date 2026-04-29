@@ -134,29 +134,29 @@ const NetworkMap = () => {
     );
 
     return (
-        <div className="flex flex-col items-center animate-fade-in w-full p-6 min-h-screen bg-white">
+        <div className="flex flex-col items-center animate-fade-in w-full p-3 sm:p-4 md:p-6 min-h-screen bg-white">
             {/* Header */}
-            <div className="mb-14">
-                <h1 className="text-6xl md:text-8xl font-black uppercase leading-none text-center">
+            <div className="mb-8 sm:mb-10 md:mb-14 w-full">
+                <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl font-black uppercase leading-none text-center">
                     NETWORK
-                    <span className="block md:inline-block bg-[#FFECA0] border-[4px] border-black px-4 ml-0 md:ml-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                    <span className="block md:inline-block bg-[#FFECA0] border-[3px] sm:border-[4px] border-black px-3 sm:px-4 ml-0 md:ml-4 mt-2 md:mt-0 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] md:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
                         MAP
                     </span>
                 </h1>
             </div>
 
             {/* Filters */}
-            <div className="w-full max-w-6xl mb-10 flex flex-col md:flex-row gap-4">
+            <div className="w-full max-w-5xl xl:max-w-6xl mb-6 sm:mb-8 md:mb-10 flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <div className="relative flex-grow">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-black" size={20} />
+                    <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-black" size={18} />
                     <input type="text" placeholder="SEARCH AGENT TOPOLOGY..." value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
-                        className="w-full pl-12 pr-4 py-4 border-4 border-black font-mono font-bold uppercase outline-none focus:bg-yellow-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all" />
+                        className="w-full pl-10 sm:pl-12 pr-4 py-3 sm:py-4 border-[3px] sm:border-4 border-black font-mono font-bold uppercase outline-none focus:bg-yellow-50 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all text-sm sm:text-base" />
                 </div>
                 <div className="relative">
-                    <Filter className="absolute left-4 top-1/2 -translate-y-1/2 text-black pointer-events-none" size={20} />
+                    <Filter className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-black pointer-events-none" size={18} />
                     <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                        className="appearance-none pl-12 pr-10 py-4 border-4 border-black font-mono font-black uppercase outline-none bg-white cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] focus:bg-[#7EA0FD] focus:text-white transition-all">
+                        className="appearance-none w-full sm:w-auto pl-10 sm:pl-12 pr-10 py-3 sm:py-4 border-[3px] sm:border-4 border-black font-mono font-black uppercase outline-none bg-white cursor-pointer shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] focus:bg-[#7EA0FD] focus:text-white transition-all text-sm sm:text-base">
                         <option value="All">All Status</option>
                         <option value="Online">Online</option>
                         <option value="Maintenance">Maintenance</option>
@@ -166,14 +166,14 @@ const NetworkMap = () => {
             </div>
 
             {/* List */}
-            <div className="w-full max-w-6xl">
+            <div className="w-full max-w-5xl xl:max-w-6xl">
                 {loading ? (
-                    <div className="flex items-center justify-center gap-4 p-12 border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                    <div className="flex items-center justify-center gap-4 p-8 sm:p-12 border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] sm:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
                         <Loader2 className="animate-spin" size={32} />
-                        <p className="font-mono text-xl font-black uppercase tracking-widest">Constructing Maps…</p>
+                        <p className="font-mono text-base sm:text-xl font-black uppercase tracking-widest">Constructing Maps…</p>
                     </div>
                 ) : filteredServers.length > 0 ? (
-                    <div className="space-y-6">
+                    <div className="space-y-4 sm:space-y-6">
                         {filteredServers.map((server, index) => {
                             const isExp = expanded[server.DeviceName];
                             const isFetching = fetchingMap[server.DeviceName];
@@ -187,27 +187,27 @@ const NetworkMap = () => {
                                     : 'bg-[#FF6B6B] text-white';
 
                             return (
-                                <div key={index} className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:shadow-[10px_10px_0_rgba(0,0,0,1)] transition-all">
+                                <div key={index} className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] sm:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:shadow-[10px_10px_0_rgba(0,0,0,1)] transition-all">
                                     {/* Header Row */}
-                                    <div className="p-5 border-b-4 border-black flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                        <div className="flex items-center gap-4">
-                                            <div className={`w-3 h-3 rounded-full border-2 border-black ${server.DisplayStatus === 'Online' ? 'bg-green-400 animate-pulse' : server.DisplayStatus === 'Maintenance' ? 'bg-blue-400' : 'bg-red-400'}`} />
-                                            <h3 className="text-2xl font-black text-black uppercase">{server.DeviceName}</h3>
-                                            <span className={`inline-block px-3 py-0.5 border-2 border-black text-[10px] font-black uppercase shadow-[3px_3px_0_rgba(0,0,0,1)] ${statusClasses}`}>
+                                    <div className="p-3 sm:p-4 md:p-5 border-b-[3px] sm:border-b-4 border-black flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div className="flex items-center gap-3 sm:gap-4 flex-wrap min-w-0">
+                                            <div className={`w-3 h-3 rounded-full border-2 border-black flex-shrink-0 ${server.DisplayStatus === 'Online' ? 'bg-green-400 animate-pulse' : server.DisplayStatus === 'Maintenance' ? 'bg-blue-400' : 'bg-red-400'}`} />
+                                            <h3 className="text-xl sm:text-2xl font-black text-black uppercase break-all">{server.DeviceName}</h3>
+                                            <span className={`inline-block px-2 sm:px-3 py-0.5 border-2 border-black text-[10px] font-black uppercase shadow-[2px_2px_0_rgba(0,0,0,1)] sm:shadow-[3px_3px_0_rgba(0,0,0,1)] ${statusClasses}`}>
                                                 {server.DisplayStatus}
                                             </span>
                                         </div>
                                         <div className="flex gap-2">
                                             <button onClick={() => toggleExpand(server.DeviceName)}
-                                                className={`font-mono text-xs font-black px-4 py-2 border-2 border-black shadow-[3px_3px_0_#000] hover:-translate-y-0.5 hover:shadow-[4px_4px_0_#000] transition-all uppercase flex items-center gap-2 ${isExp ? 'bg-black text-white hover:bg-gray-800' : 'bg-[#e2e8f0] hover:bg-[#cbd5e1]'}`}>
-                                                {isExp ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                                                className={`font-mono text-[11px] sm:text-xs font-black px-3 sm:px-4 py-2 border-2 border-black shadow-[2px_2px_0_#000] sm:shadow-[3px_3px_0_#000] hover:-translate-y-0.5 hover:shadow-[4px_4px_0_#000] transition-all uppercase flex items-center gap-1.5 sm:gap-2 ${isExp ? 'bg-black text-white hover:bg-gray-800' : 'bg-[#e2e8f0] hover:bg-[#cbd5e1]'}`}>
+                                                {isExp ? <Minimize2 size={13} className="sm:w-[14px] sm:h-[14px]" /> : <Maximize2 size={13} className="sm:w-[14px] sm:h-[14px]" />}
                                                 {isExp ? 'Collapse Map' : 'View Network'}
                                             </button>
                                         </div>
                                     </div>
 
                                     {/* Meta Bar */}
-                                    <div className="px-5 py-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 font-mono text-[11px] font-bold text-gray-600 uppercase bg-gray-50 border-white" style={isExp ? { borderBottom: '4px solid black' } : {}}>
+                                    <div className="px-3 sm:px-4 md:px-5 py-2 sm:py-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-4 sm:gap-x-6 gap-y-2 font-mono text-[10px] sm:text-[11px] font-bold text-gray-600 uppercase bg-gray-50 border-white" style={isExp ? { borderBottom: '4px solid black' } : {}}>
                                         <div className="flex items-center gap-2"><MapPin size={14} /> {server.Location || 'N/A'}</div>
                                         <div className="flex items-center gap-2"><Cpu size={14} /> {server.DeviceType || 'N/A'}</div>
                                         <div className="flex items-center gap-2"><Calendar size={14} /> {server.DateCreated || 'N/A'}</div>
@@ -273,7 +273,7 @@ const NetworkMap = () => {
                         })}
                     </div>
                 ) : (
-                    <div className="p-16 border-4 border-black bg-white shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] text-center">
+                    <div className="p-8 sm:p-12 md:p-16 border-[3px] sm:border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] sm:shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] text-center">
                         <Activity className="mx-auto mb-4 opacity-10 text-black" size={80} />
                         <p className="font-black uppercase text-2xl text-gray-300 italic">No Matching Nodes Found</p>
                         <button onClick={() => { setSearchTerm(""); setStatusFilter("All"); }}

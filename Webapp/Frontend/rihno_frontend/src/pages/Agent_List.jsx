@@ -156,29 +156,29 @@ const Agent_List = () => {
     }
 
     return (
-        <div className="flex flex-col items-center animate-fade-in w-full p-6 min-h-screen bg-white">
+        <div className="flex flex-col items-center animate-fade-in w-full p-3 sm:p-4 md:p-6 min-h-screen bg-white">
             {/* Header */}
-            <div className="mb-14">
-                <h1 className="text-6xl md:text-8xl font-black uppercase leading-none text-center">
+            <div className="mb-8 sm:mb-10 md:mb-14 w-full">
+                <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl font-black uppercase leading-none text-center">
                     AGENT
-                    <span className="block md:inline-block bg-[#FFECA0] border-[4px] border-black px-4 ml-0 md:ml-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                    <span className="block md:inline-block bg-[#FFECA0] border-[3px] sm:border-[4px] border-black px-3 sm:px-4 ml-0 md:ml-4 mt-2 md:mt-0 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] md:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
                         LIST
                     </span>
                 </h1>
             </div>
 
             {/* Filters */}
-            <div className="w-full max-w-5xl mb-10 flex flex-col md:flex-row gap-4">
+            <div className="w-full max-w-5xl xl:max-w-6xl mb-6 sm:mb-8 md:mb-10 flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <div className="relative flex-grow">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-black" size={20} />
+                    <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-black" size={18} />
                     <input type="text" placeholder="SEARCH BY AGENT NAME..." value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
-                        className="w-full pl-12 pr-4 py-4 border-4 border-black font-mono font-bold uppercase outline-none focus:bg-yellow-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all" />
+                        className="w-full pl-10 sm:pl-12 pr-4 py-3 sm:py-4 border-[3px] sm:border-4 border-black font-mono font-bold uppercase outline-none focus:bg-yellow-50 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all text-sm sm:text-base" />
                 </div>
                 <div className="relative">
-                    <Filter className="absolute left-4 top-1/2 -translate-y-1/2 text-black pointer-events-none" size={20} />
+                    <Filter className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-black pointer-events-none" size={18} />
                     <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                        className="appearance-none pl-12 pr-10 py-4 border-4 border-black font-mono font-black uppercase outline-none bg-white cursor-pointer shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] focus:bg-[#7EA0FD] focus:text-white transition-all">
+                        className="appearance-none w-full sm:w-auto pl-10 sm:pl-12 pr-10 py-3 sm:py-4 border-[3px] sm:border-4 border-black font-mono font-black uppercase outline-none bg-white cursor-pointer shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] focus:bg-[#7EA0FD] focus:text-white transition-all text-sm sm:text-base">
                         <option value="All">All Status</option>
                         <option value="Online">Online</option>
                         <option value="Maintenance">Maintenance</option>
@@ -188,7 +188,7 @@ const Agent_List = () => {
             </div>
 
             {/* Content */}
-            <div className="w-full max-w-5xl">
+            <div className="w-full max-w-5xl xl:max-w-6xl">
                 {loading ? (
                     <div className="flex items-center justify-center gap-4 p-12 border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
                         <Loader2 className="animate-spin" size={32} />
@@ -223,41 +223,41 @@ const Agent_List = () => {
 
                             return (
                                 <div key={index}
-                                    className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:shadow-[10px_10px_0_rgba(0,0,0,1)] transition-all">
+                                    className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] sm:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] hover:shadow-[10px_10px_0_rgba(0,0,0,1)] transition-all">
 
                                     {/* Card header */}
-                                    <div className="p-5 border-b-4 border-black flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                        <div className="flex items-center gap-4">
-                                            <div className={`w-3 h-3 rounded-full border-2 border-black ${server.DisplayStatus === 'Online' ? 'bg-green-400 animate-pulse' : server.DisplayStatus === 'Maintenance' ? 'bg-blue-400' : 'bg-red-400'}`} />
-                                            <div>
-                                                <h3 className="text-3xl font-black text-black uppercase leading-none">{server.DeviceName}</h3>
-                                                <p className="font-mono text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">ID: {server.DeviceType}</p>
+                                    <div className="p-3 sm:p-4 md:p-5 border-b-[3px] sm:border-b-4 border-black flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                        <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-wrap min-w-0">
+                                            <div className={`w-3 h-3 rounded-full border-2 border-black flex-shrink-0 ${server.DisplayStatus === 'Online' ? 'bg-green-400 animate-pulse' : server.DisplayStatus === 'Maintenance' ? 'bg-blue-400' : 'bg-red-400'}`} />
+                                            <div className="min-w-0">
+                                                <h3 className="text-xl sm:text-2xl md:text-3xl font-black text-black uppercase leading-none break-all">{server.DeviceName}</h3>
+                                                <p className="font-mono text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">ID: {server.DeviceType}</p>
                                             </div>
-                                            <span className={`inline-block px-3 py-1 border-2 border-black text-[10px] font-black uppercase shadow-[3px_3px_0_rgba(0,0,0,1)] ml-2 ${statusClasses}`}>
+                                            <span className={`inline-block px-2 sm:px-3 py-1 border-2 border-black text-[10px] font-black uppercase shadow-[2px_2px_0_rgba(0,0,0,1)] sm:shadow-[3px_3px_0_rgba(0,0,0,1)] ${statusClasses}`}>
                                                 {server.DisplayStatus}
                                             </span>
                                         </div>
-                                        <div className="flex gap-2">
+                                        <div className="flex gap-2 flex-wrap">
                                             <button onClick={() => setExpanded(prev => ({ ...prev, [server.DeviceName]: !isExp }))}
-                                                className="font-mono text-xs font-black px-4 py-2 border-2 border-black shadow-[3px_3px_0_#000] hover:-translate-y-0.5 hover:shadow-[4px_4px_0_#000] transition-all uppercase bg-white hover:bg-[#FFECA0]">
+                                                className="font-mono text-[11px] sm:text-xs font-black px-3 sm:px-4 py-2 border-2 border-black shadow-[2px_2px_0_#000] sm:shadow-[3px_3px_0_#000] hover:-translate-y-0.5 hover:shadow-[4px_4px_0_#000] transition-all uppercase bg-white hover:bg-[#FFECA0]">
                                                 {isExp ? '▲ Collapse' : '▼ Expand'}
                                             </button>
                                             <button onClick={() => goToAnalytics(server.DeviceName)}
-                                                className="font-mono text-xs font-black px-4 py-2 border-2 border-black shadow-[3px_3px_0_#000] hover:-translate-y-0.5 hover:shadow-[4px_4px_0_#000] transition-all uppercase bg-white hover:bg-[#CEFFBC] flex items-center gap-1.5">
-                                                <BarChart2 size={13} /> Deep Analytics
+                                                className="font-mono text-[11px] sm:text-xs font-black px-3 sm:px-4 py-2 border-2 border-black shadow-[2px_2px_0_#000] sm:shadow-[3px_3px_0_#000] hover:-translate-y-0.5 hover:shadow-[4px_4px_0_#000] transition-all uppercase bg-white hover:bg-[#CEFFBC] flex items-center gap-1 sm:gap-1.5">
+                                                <BarChart2 size={12} className="sm:w-[13px] sm:h-[13px]" /> <span className="hidden xs:inline">Deep</span> Analytics
                                             </button>
                                         </div>
                                     </div>
 
                                     {/* Meta row */}
-                                    <div className="px-5 py-3 border-b-2 border-black grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 font-mono text-[11px] font-bold text-gray-600 uppercase">
-                                        <div className="flex items-center gap-2"><MapPin size={14} /> {server.Location || 'N/A'}</div>
-                                        <div className="flex items-center gap-2"><Cpu size={14} /> {server.DeviceType || 'N/A'}</div>
-                                        <div className="flex items-center gap-2"><Calendar size={14} /> {server.DateCreated || 'N/A'}</div>
+                                    <div className="px-3 sm:px-4 md:px-5 py-2 sm:py-3 border-b-2 border-black grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-4 sm:gap-x-6 gap-y-2 font-mono text-[10px] sm:text-[11px] font-bold text-gray-600 uppercase">
+                                        <div className="flex items-center gap-2 truncate"><MapPin size={14} className="flex-shrink-0" /> <span className="truncate">{server.Location || 'N/A'}</span></div>
+                                        <div className="flex items-center gap-2 truncate"><Cpu size={14} className="flex-shrink-0" /> <span className="truncate">{server.DeviceType || 'N/A'}</span></div>
+                                        <div className="flex items-center gap-2 truncate"><Calendar size={14} className="flex-shrink-0" /> <span className="truncate">{server.DateCreated || 'N/A'}</span></div>
                                     </div>
 
                                     {/* ── 5 mini charts — always visible ── */}
-                                    <div className="p-4 grid grid-cols-2 md:grid-cols-5 gap-4 border-b-2 border-black bg-gray-50/50 relative">
+                                    <div className="p-2 sm:p-3 md:p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 md:gap-4 border-b-2 border-black bg-gray-50/50 relative">
                                         <div className="absolute top-0 left-0 w-full h-1 bg-black opacity-10" />
                                         {/* CPU */}
                                         <MiniDonut
@@ -302,9 +302,9 @@ const Agent_List = () => {
 
                                     {/* ── Expanded detail section ── */}
                                     {isExp && (
-                                        <div className="p-5 bg-white">
-                                            <h4 className="font-mono font-black uppercase text-xs text-gray-400 mb-4 border-b-2 border-black pb-2">Extended Metrics</h4>
-                                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                        <div className="p-3 sm:p-4 md:p-5 bg-white">
+                                            <h4 className="font-mono font-black uppercase text-xs text-gray-400 mb-3 sm:mb-4 border-b-2 border-black pb-2">Extended Metrics</h4>
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3 md:gap-4">
                                                 {/* Swap */}
                                                 <MiniDonut
                                                     data={[{ name: 'Free', value: +(100 - (d.swap_used_percent || 0)).toFixed(2) }, { name: 'Used', value: +(d.swap_used_percent || 0).toFixed(2) }]}
