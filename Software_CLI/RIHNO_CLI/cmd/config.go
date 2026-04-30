@@ -1,6 +1,3 @@
-/*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -165,7 +162,7 @@ func VerifyConfig(rihnoConfig Config) (bool, error) {
 	//}
 
 	//baseURL := v.GetString("RPI_API")
-	baseURL := "http://192.168.1.10:5050/api/cli_auth"
+	baseURL := "http://localhost:5050/api/cli_auth"
 	//if baseURL == "" {
 	//	return false, fmt.Errorf("API base URL (RPI_API) is not set in .env")
 	//}
