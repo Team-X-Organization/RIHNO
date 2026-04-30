@@ -19,6 +19,11 @@ const AWS_API_CLI_AUTH_URL = process.env.AWS_API_CLI_AUTH_URL;
 // ------------- FRONT END CONST
 const AWS_API_URL = process.env.AWS_DEVICE_API_URL;
 
+// ------------- AI THREAT + NOTIFICATION CONST
+// Defaults assume rihno-network (container-to-container DNS via service name).
+const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://my_rihno_ai_engine:4050';
+const NOTIFY_ENGINE_URL = process.env.NOTIFY_ENGINE_URL || 'http://my_rihno_notify:5060';
+
 app.use(cors());
 app.use(express.json());
 
@@ -64,9 +69,6 @@ app.get('/api/cli_auth', async (req, res) => {
         });
     }
 })
-
-// IMPORTANT: This middleware is required to parse JSON bodies
-app.use(express.json());
 
 const kafkaBroker = process.env.KAFKA_BROKER || 'localhost:9092';
 const kafka = new Kafka({
@@ -311,7 +313,7 @@ app.get('/api/ip_threats', async (req, res) => {
         }
 
         // Default to the Flask app's local address, but allow override via .env
-        const THREAT_API_URL = process.env.THREAT_API_URL || 'http://host.docker.internal:8888/api/scans';
+        const THREAT_API_URL = process.env.THREAT_API_URL || 'http://my_rihno_ip_threat:8888/api/scans';
 
         // 1. Fetch the global state from your Python Flask service
         const response = await axios.get(THREAT_API_URL);
@@ -340,6 +342,244 @@ app.get('/api/ip_threats', async (req, res) => {
             message: 'Failed to fetch threat data from the analysis service',
             details: error.message
         });
+    }
+});
+
+// ---------------------------------------------------------------------------------- AI THREAT ENGINE PROXY
+
+// Helper: forward axios errors with consistent shape
+function forwardAxiosError(error, res, fallbackMessage) {
+    const status = error.response?.status || 500;
+    const details = error.response?.data || error.message;
+    console.error(`${fallbackMessage}:`, details);
+    return res.status(status).json({
+        status: 'error',
+        message: fallbackMessage,
+        details,
+    });
+}
+
+// Global AI engine status (all agents + global stats)
+app.get('/api/ai/status', async (req, res) => {
+    try {
+        const response = await axios.get(`${AI_ENGINE_URL}/status`, { timeout: 8000 });
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to reach AI engine');
+    }
+});
+
+// Per-agent status
+app.get('/api/ai/agents/:agentName/status', async (req, res) => {
+    const { email } = req.query;
+    const { agentName } = req.params;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.get(
+            `${AI_ENGINE_URL}/agents/${encodeURIComponent(email)}/${encodeURIComponent(agentName)}/status`,
+            { timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to fetch AI agent status');
+    }
+});
+
+// Per-agent recent alerts
+app.get('/api/ai/agents/:agentName/alerts', async (req, res) => {
+    const { email, count = 50 } = req.query;
+    const { agentName } = req.params;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.get(
+            `${AI_ENGINE_URL}/agents/${encodeURIComponent(email)}/${encodeURIComponent(agentName)}/alerts`,
+            { params: { count }, timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to fetch AI agent alerts');
+    }
+});
+
+// Global alerts feed
+app.get('/api/ai/alerts', async (req, res) => {
+    try {
+        const response = await axios.get(`${AI_ENGINE_URL}/alerts`, {
+            params: { count: req.query.count || 100 },
+            timeout: 8000,
+        });
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to fetch AI alerts');
+    }
+});
+
+// Per-user threat summary (last assessment + alerts + status, all agents)
+app.get('/api/ai/threat_summary', async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.get(`${AI_ENGINE_URL}/threat_summary`, {
+            params: { email },
+            timeout: 10000,
+        });
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to fetch AI threat summary');
+    }
+});
+
+// Auto-detector status
+app.get('/api/ai/auto_detector/status', async (req, res) => {
+    try {
+        const response = await axios.get(`${AI_ENGINE_URL}/auto_detector/status`, { timeout: 5000 });
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to fetch auto-detector status');
+    }
+});
+
+// Trigger detection from latest stream metric
+app.post('/api/ai/detect/:agentName', async (req, res) => {
+    const { email } = req.query;
+    const { agentName } = req.params;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.post(
+            `${AI_ENGINE_URL}/detect/${encodeURIComponent(email)}/${encodeURIComponent(agentName)}`,
+            {},
+            { timeout: 12000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to run AI detection');
+    }
+});
+
+// ---------------------------------------------------------------------------------- NOTIFICATION ENGINE PROXY
+
+// Threat status summary (per-user, derived from AI engine)
+app.get('/api/notify/threats', async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.get(
+            `${NOTIFY_ENGINE_URL}/threats/${encodeURIComponent(email)}`,
+            { timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to fetch threat status');
+    }
+});
+
+// List recipients
+app.get('/api/notify/recipients', async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.get(
+            `${NOTIFY_ENGINE_URL}/recipients/${encodeURIComponent(email)}`,
+            { timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to fetch recipients');
+    }
+});
+
+// Add recipient
+app.post('/api/notify/recipients', async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.post(
+            `${NOTIFY_ENGINE_URL}/recipients/${encodeURIComponent(email)}`,
+            req.body,
+            { timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to add recipient');
+    }
+});
+
+// Update recipient
+app.patch('/api/notify/recipients/:recId', async (req, res) => {
+    const { email } = req.query;
+    const { recId } = req.params;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.patch(
+            `${NOTIFY_ENGINE_URL}/recipients/${encodeURIComponent(email)}/${encodeURIComponent(recId)}`,
+            req.body,
+            { timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to update recipient');
+    }
+});
+
+// Delete recipient
+app.delete('/api/notify/recipients/:recId', async (req, res) => {
+    const { email } = req.query;
+    const { recId } = req.params;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.delete(
+            `${NOTIFY_ENGINE_URL}/recipients/${encodeURIComponent(email)}/${encodeURIComponent(recId)}`,
+            { timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to delete recipient');
+    }
+});
+
+// Settings
+app.get('/api/notify/settings', async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.get(
+            `${NOTIFY_ENGINE_URL}/settings/${encodeURIComponent(email)}`,
+            { timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to fetch settings');
+    }
+});
+
+app.put('/api/notify/settings', async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.put(
+            `${NOTIFY_ENGINE_URL}/settings/${encodeURIComponent(email)}`,
+            req.body,
+            { timeout: 8000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to update settings');
+    }
+});
+
+// Test send
+app.post('/api/notify/test', async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    try {
+        const response = await axios.post(
+            `${NOTIFY_ENGINE_URL}/test/${encodeURIComponent(email)}`,
+            req.body,
+            { timeout: 15000 }
+        );
+        res.status(200).json(response.data);
+    } catch (error) {
+        forwardAxiosError(error, res, 'Failed to send test notification');
     }
 });
 

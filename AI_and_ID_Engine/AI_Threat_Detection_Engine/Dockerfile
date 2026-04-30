@@ -5,9 +5,10 @@
 
 FROM python:3.12-slim
 
-# Prevents Python from writing .pyc files and buffers stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
@@ -15,30 +16,32 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ── Copy application code ────────────────────────────────────────────────────
-COPY feature_extractor.py .
-COPY statistical_detector.py .
-COPY isolation_forest_detector.py .
-COPY autoencoder_detector.py .
-COPY network_analyzer.py .
-COPY ensemble_scorer.py .
-COPY redis_store.py .
-COPY main.py .
-COPY api_server.py .
+# ── Application code ────────────────────────────────────────────────────────
+COPY feature_extractor.py \
+     statistical_detector.py \
+     isolation_forest_detector.py \
+     autoencoder_detector.py \
+     network_analyzer.py \
+     ensemble_scorer.py \
+     redis_store.py \
+     main.py \
+     auto_detector.py \
+     api_server.py \
+     ./
 
-# ── Port ─────────────────────────────────────────────────────────────────────
+# ── Drop privileges ─────────────────────────────────────────────────────────
+RUN groupadd -r rihno && useradd -r -g rihno rihno && chown -R rihno:rihno /app
+USER rihno
+
 EXPOSE 4050
 
-# ── Environment defaults ─────────────────────────────────────────────────────
 ENV REDIS_HOST="my_rihno_redis" \
     REDIS_PORT="6379" \
     REDIS_PASS="" \
     REDIS_DB="0" \
     IDS_PORT="4050"
 
-# ── Health check ─────────────────────────────────────────────────────────────
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:4050/health')" || exit 1
 
-# ── Start the API server ─────────────────────────────────────────────────────
 CMD ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "4050"]

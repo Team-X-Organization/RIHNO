@@ -19,10 +19,12 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from redis_store import RedisStore
 from main import IDSEngine
+from auto_detector import AutoDetector
 
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -41,9 +43,29 @@ app = FastAPI(
     version="2.0.0",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 store = RedisStore(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, password=REDIS_PASS)
 engine = IDSEngine(store)
 engine_lock = threading.Lock()
+
+AUTO_DETECT_INTERVAL = float(os.environ.get("AUTO_DETECT_INTERVAL", "5.0"))
+auto_detector = AutoDetector(engine, store, engine_lock, poll_interval=AUTO_DETECT_INTERVAL)
+
+
+@app.on_event("startup")
+def _startup_auto_detector():
+    auto_detector.start()
+
+
+@app.on_event("shutdown")
+def _shutdown_auto_detector():
+    auto_detector.stop()
 
 
 # ── Models ───────────────────────────────────────────────────────────────────
@@ -77,7 +99,7 @@ class DetectionResult(BaseModel):
 async def ingest_metric(metric: MetricInput):
     """Ingest a metric and return threat assessment."""
     with engine_lock:
-        result = engine.process(metric.dict())
+        result = engine.process(metric.model_dump())
     return result
 
 
@@ -212,3 +234,55 @@ async def save_models():
     with engine_lock:
         engine.save_all()
     return {"status": "saved", "pipelines": len(engine._pipelines)}
+
+
+# ── Auto-detector ────────────────────────────────────────────────────────────
+
+@app.get("/auto_detector/status")
+async def auto_detector_status():
+    return auto_detector.status()
+
+
+# ── Threat Summary (per-user aggregation for frontend) ───────────────────────
+
+@app.get("/threat_summary")
+async def threat_summary(email: str = Query(..., description="Owner email")):
+    """
+    Aggregate per-agent threat data for a single user. Read-only.
+    Returns last assessment (level, score, layers), recent alerts, pipeline status.
+    """
+    safe_owner = email.replace(":", "_")
+    all_agents = store.get_all_agents()
+    agents_out = []
+
+    for agent_id in all_agents:
+        if ":" not in agent_id:
+            continue
+        owner, agent_name = agent_id.split(":", 1)
+        if owner != safe_owner:
+            continue
+
+        latest_metric = store.get_latest_metric(owner, agent_name)
+        recent_alerts = store.get_recent_alerts(owner, agent_name, count=10)
+        last_assessment = store.get_last_assessment(owner, agent_name)
+
+        with engine_lock:
+            status_obj = engine.get_agent_status(owner, agent_name)
+
+        agents_out.append({
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "email": owner,
+            "stream_length": store.get_stream_length(owner, agent_name),
+            "last_assessment": last_assessment,
+            "recent_alerts": recent_alerts,
+            "status": status_obj,
+            "last_metric_ts": latest_metric.get("timestamp") if latest_metric else None,
+        })
+
+    return {
+        "email": email,
+        "agents": agents_out,
+        "agent_count": len(agents_out),
+        "auto_detector": auto_detector.status(),
+    }

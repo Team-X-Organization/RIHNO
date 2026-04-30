@@ -158,6 +158,20 @@ class IDSEngine:
 
         result = pipeline.process(features, net_features, metadata)
 
+        # Always store the latest assessment so frontend can show current
+        # threat score even when no alert was raised.
+        self.store.save_last_assessment(email, agent_name, {
+            "timestamp": result.get("timestamp"),
+            "threat_level": result.get("threat_level"),
+            "final_score": result.get("final_score"),
+            "layer_contributions": result.get("layer_contributions", {}),
+            "anomalous_features": result.get("anomalous_features", []),
+            "critical_alerts": result.get("critical_alerts", []),
+            "network_alerts": result.get("network_alerts", []),
+            "network_patterns": result.get("network_patterns", []),
+            "system_status": result.get("system_status", {}),
+        })
+
         if result["threat_level"] != "normal":
             self.store.push_alert(email, agent_name, {
                 "timestamp": result["timestamp"],

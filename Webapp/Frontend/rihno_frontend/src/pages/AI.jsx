@@ -63,6 +63,12 @@ function Ai() {
 
     const messagesEndRef = useRef(null);
 
+    useEffect(() => {
+        if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+    }, [messages, isLoading]);
+
 
     const renderMarkdown = (text) => {
         if (!text) return null;

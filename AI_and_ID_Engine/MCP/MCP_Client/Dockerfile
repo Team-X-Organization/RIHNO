@@ -1,9 +1,9 @@
 # ============================================================
-# RIHNO IDS API — single-stage image using uv
+# RIHNO MCP Client API — single-stage image using uv
 # ============================================================
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-# Install Docker CLI from the official Docker repo (newer than apt's docker.io)
+# Docker CLI (newer than apt's docker.io) — required for spawning MCP server containers
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg \
     && install -m 0755 -d /etc/apt/keyrings \
@@ -18,14 +18,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy dependency manifests + source
+# Cache deps
 COPY pyproject.toml uv.lock* ./
-COPY api.py ./
 
 # Install dependencies (creates .venv automatically)
 RUN uv sync --no-dev
 
-# ── AWS / RIHNO tunables (override at `docker run` time) ──────────────
+# Source
+COPY api.py ./
+
 ENV RIHNO_AWS_REGION=us-east-1 \
     RIHNO_DOCKER_IMAGE=rihno_mcp_server \
     RIHNO_MODEL_ID=claude-3.5-sonnet \
@@ -36,6 +37,6 @@ ENV RIHNO_AWS_REGION=us-east-1 \
 EXPOSE 8001
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/status')"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/status')" || exit 1
 
 CMD ["uv", "run", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8001"]

@@ -192,6 +192,17 @@ class RedisStore:
         stats["registered_agents"] = self.redis.scard(self._key("agents"))
         return stats
 
+    # ── Last Assessment (every detection result, even "normal") ──
+
+    def save_last_assessment(self, email: str, agent: str, result: dict) -> None:
+        agent_id = self._agent_key(email, agent)
+        self.redis.set(self._key(agent_id, "last_assessment"), json.dumps(result))
+
+    def get_last_assessment(self, email: str, agent: str) -> Optional[dict]:
+        agent_id = self._agent_key(email, agent)
+        data = self.redis.get(self._key(agent_id, "last_assessment"))
+        return json.loads(data) if data else None
+
     # ── Agent Summary ─────────────────────────────────────────────
 
     def get_agent_summary(self, email: str, agent: str) -> dict:
@@ -211,7 +222,7 @@ class RedisStore:
         agent_id = self._agent_key(email, agent)
         keys = [
             self._key(agent_id, s)
-            for s in ["stream", "latest", "alerts", "config"]
+            for s in ["stream", "latest", "alerts", "config", "last_assessment"]
         ] + [
             self._key(agent_id, "model", c)
             for c in ["iforest", "autoencoder", "normalizer"]

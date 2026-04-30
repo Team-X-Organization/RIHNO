@@ -1,24 +1,31 @@
-# 1. Use a lightweight Python base image
+# RIHNO MCP Server (STDIO transport)
+# Build: docker build -t rihno_mcp_server .
+# Used by MCP Client which spawns it as a subprocess.
+
 FROM python:3.12-slim
 
-# 2. Copy the pre-compiled uv binary from Astral's official image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/opt/venv/bin:$PATH"
 
-# 3. Set the working directory
+# uv binary for fast dependency installs
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /bin/
+
 WORKDIR /app
 
-# 4. Create a virtual environment and install dependencies using uv
-# Using psycopg2-binary skips the need for system-level build tools like gcc
+# Create venv + install runtime deps
+# psycopg2-binary skips system build tools (gcc/libpq-dev)
 RUN uv venv /opt/venv && \
     uv pip install --python /opt/venv mcp psycopg2-binary
 
-# 5. Ensure the virtual environment is used for all subsequent commands
-ENV PATH="/opt/venv/bin:$PATH"
+# Source
+COPY main.py ./
 
-# 6. Copy your MCP server script into the container
-# (Assuming your python file is named server.py)
-COPY main.py .
+# Drop privileges
+RUN groupadd -r rihno && useradd -r -g rihno rihno && chown -R rihno:rihno /app /opt/venv
+USER rihno
 
-# 7. Run the server
-# Since MCP uses STDIO for transport, we just execute the script.
+# MCP transport is STDIO — no port to expose
 CMD ["python", "main.py"]

@@ -3,6 +3,7 @@
 # This adds:
 #   1. my_rihno_redis     — Redis server for the IDS AI pipeline
 #   2. my_rihno_ids       — Python IDS Zero-Day Detection API
+#   3. my_rihno_notify    — Python Notification Engine (email + SMS)
 #
 # Your existing services (my_rihno_db, my_rihno_kafka, dealer) remain unchanged.
 # The dealer now writes to Redis IN ADDITION to PostgreSQL and Kafka.
@@ -22,7 +23,7 @@ services:
     depends_on:
       - my_rihno_db
       - my_rihno_kafka
-      - my_rihno_redis       # ← NEW dependency
+      - my_rihno_redis
 
   # ── Redis for IDS AI Pipeline ────────────────────────────────────────────────
   my_rihno_redis:
@@ -39,13 +40,36 @@ services:
       retries: 5
 
   # ── IDS Zero-Day Detection API (Python) ──────────────────────────────────────
-  my_rihno_ids:
-    build: ./ids_zero_day
+  my_rihno_ai_engine:
+    build: ../../AI_and_ID_Engine/AI_Threat_Detection_Engine
+    container_name: my_rihno_ai_engine
     ports:
-      - "8001:8000"          # IDS API on host port 8001
+      - "4050:4050"
     environment:
       - REDIS_HOST=my_rihno_redis
       - REDIS_PORT=6379
+    depends_on:
+      my_rihno_redis:
+        condition: service_healthy
+
+  # ── Notification Engine (Python) ─────────────────────────────────────────────
+  my_rihno_notify:
+    build: ../Notification_Engine
+    container_name: my_rihno_notify
+    ports:
+      - "5060:5060"
+    environment:
+      - REDIS_HOST=my_rihno_redis
+      - REDIS_PORT=6379
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_FROM_NUMBER=${TWILIO_FROM_NUMBER:-}
     depends_on:
       my_rihno_redis:
         condition: service_healthy

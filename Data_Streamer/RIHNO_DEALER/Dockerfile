@@ -1,39 +1,37 @@
 # ─── Stage 1: Build ───────────────────────────────────────────────────────────
-FROM golang:1.25-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
-# Install git (needed by go mod to fetch private/public deps)
 RUN apk add --no-cache git
 
 WORKDIR /app
 
-# Copy source and initialise the module
-COPY main.go .
-COPY redis_pipeline.go .
+# Cache module deps
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Bootstrap go.mod + go.sum, then tidy to pull all dependencies
-RUN go mod init dealer && \
-    go mod tidy
+# Source
+COPY main.go redis_pipeline.go ./
 
-# Build a fully static binary (CGO disabled for scratch/alpine compatibility)
-RUN CGO_ENABLED=0 GOOS=linux go build -o dealer .
+# Static binary (CGO disabled for scratch/alpine compatibility)
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" -o dealer .
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────
 FROM alpine:3.20
 
-# ca-certificates is needed for any outbound TLS calls
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata wget && \
+    addgroup -S rihno && adduser -S rihno -G rihno
 
 WORKDIR /app
 
-# Copy only the compiled binary from the builder stage
 COPY --from=builder /app/dealer .
+RUN chown -R rihno:rihno /app
 
-# ── Ports ────────────────────────────────────────────────────────────────────
-# 8000 → HTTP REST API (overridable via HTTP_PORT)
-# 8080 → TCP agent listener  (overridable via TCP_PORT)
+USER rihno
+
+# 8000 → HTTP REST API   (overridable via HTTP_PORT)
+# 8080 → TCP agent listener (overridable via TCP_PORT)
 EXPOSE 8000 8080
 
-# ── Environment defaults ─────────────────────────────────────────────────────
 ENV HTTP_PORT=8000 \
     TCP_PORT=8080 \
     DB_URL="" \
@@ -42,5 +40,7 @@ ENV HTTP_PORT=8000 \
     REDIS_PASS="" \
     REDIS_DB="0"
 
-# ── Entrypoint ───────────────────────────────────────────────────────────────
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8000/health || exit 1
+
 ENTRYPOINT ["./dealer"]
