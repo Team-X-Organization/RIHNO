@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+
+# uv cache
+.cache/
+
+# Secrets / AWS
+.env
+.env.*
+*.pem
+*.key
+.aws/
+
+# Dev / IDE
+.git/
+.github/
+.vscode/
+.idea/
+*.md
+
+# Tests
+tests/
+.pytest_cache/
