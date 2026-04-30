@@ -2,7 +2,7 @@
 > Currently under build process. Coming Soon!
 
 <div align="center">
-  <img src="./Media/rihnoNew.svg" style="width:100px">
+  <img src="./Doc/Media/rihnoNew.svg" style="width:100px">
   <h1>RIHNO</h1>
   <h3>A.I. Based Intrusion Detection System</h3>
   
