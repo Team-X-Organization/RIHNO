@@ -5,6 +5,8 @@ Background poller: scans the AI engine's per-agent alert ZSETs in Redis,
 finds alerts above each user's threshold, and dispatches email + SMS.
 
 Dedupes via RecipientsStore.mark_sent().
+One email per agent per poll — dispatches only the newest qualifying unsent
+alert, preventing startup floods when many old alerts sit in Redis.
 """
 
 import json
@@ -29,6 +31,9 @@ THREAT_RANK = {"normal": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
 POLL_INTERVAL_SECONDS = 10
 ALERT_LOOKBACK = 20  # newest N alerts per agent per poll
+# Minimum seconds between two dispatched notifications for the same agent.
+# Prevents back-to-back emails when multiple alerts clear the threshold.
+MIN_DISPATCH_INTERVAL = 60  # 1 minute
 
 
 def _alert_id(agent_id: str, alert: Dict) -> str:
@@ -53,6 +58,8 @@ class AlertWatcher:
         self._thread: Optional[threading.Thread] = None
         self._last_dispatch: Dict[str, dict] = {}
         self._last_threat: Dict[str, dict] = {}
+        # Per-agent last-dispatch wall time — enforces MIN_DISPATCH_INTERVAL.
+        self._agent_last_dispatch_ts: Dict[str, float] = {}
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -115,6 +122,9 @@ class AlertWatcher:
             return
 
         latest_for_agent: Optional[dict] = None
+        # Track the single best unsent alert above threshold to dispatch this poll.
+        best_unsent: Optional[dict] = None
+        best_unsent_rank: int = -1
 
         for raw in entries:
             payload = raw.decode() if isinstance(raw, bytes) else raw
@@ -128,16 +138,21 @@ class AlertWatcher:
                 latest_for_agent = alert
 
             level = alert.get("threat_level", "normal")
-            if THREAT_RANK.get(level, 0) < threshold:
+            rank = THREAT_RANK.get(level, 0)
+            if rank < threshold:
                 continue
 
             uid = _alert_id(agent_id, alert)
             if self.store.already_sent(email, uid):
                 continue
 
-            if not muted:
-                self._dispatch(email, alert)
+            # Mark all qualifying unsent alerts as sent to prevent future floods,
+            # but only actually dispatch the highest-severity one this poll.
             self.store.mark_sent(email, uid)
+
+            if rank > best_unsent_rank:
+                best_unsent = alert
+                best_unsent_rank = rank
 
         if latest_for_agent is not None:
             self._last_threat[agent_id] = {
@@ -145,7 +160,24 @@ class AlertWatcher:
                 "final_score": latest_for_agent.get("final_score", 0),
                 "timestamp": latest_for_agent.get("timestamp", ""),
                 "email": email,
+                "ai_summary": self._last_threat.get(agent_id, {}).get("ai_summary", ""),
             }
+
+        if best_unsent is None or muted:
+            return
+
+        # Rate-limit: skip if a notification for this agent went out recently.
+        now = time.time()
+        last_ts = self._agent_last_dispatch_ts.get(agent_id, 0)
+        if now - last_ts < MIN_DISPATCH_INTERVAL:
+            logger.info(
+                "Suppressing notification for %s — last sent %.0fs ago (cooldown %ds)",
+                agent_id, now - last_ts, MIN_DISPATCH_INTERVAL,
+            )
+            return
+
+        self._agent_last_dispatch_ts[agent_id] = now
+        self._dispatch(email, best_unsent)
 
     # ── Dispatch ─────────────────────────────────────────────────────────────
 
@@ -159,6 +191,16 @@ class AlertWatcher:
         email_summary = summary.get("email_summary", "") if summary else ""
         sms_summary = summary.get("sms_summary", "") if summary else ""
 
+        if email_summary:
+            logger.info("Bedrock summary included in notification for agent %s", alert.get("agent_id"))
+        else:
+            logger.info("No Bedrock summary for agent %s (check AWS creds / BEDROCK_SUMMARY_DISABLED)", alert.get("agent_id"))
+
+        # Persist the summary text so the frontend /threats endpoint can return it.
+        agent_id = alert.get("agent_id", "")
+        if agent_id and agent_id in self._last_threat:
+            self._last_threat[agent_id]["ai_summary"] = email_summary
+
         body = build_alert_body(alert, ai_summary=email_summary)
         html = build_alert_html(alert, ai_summary=email_summary)
         sms_body = build_sms_body(alert, ai_summary=sms_summary)
@@ -171,6 +213,7 @@ class AlertWatcher:
                 "channel": "email", "level": alert.get("threat_level"),
                 "ai_summary": bool(email_summary),
             }
+            logger.info("Email dispatch → %s ok=%s", rec["value"], ok)
 
         phones = self.store.get_enabled_by_type(email, "sms")
         for rec in phones:
@@ -180,6 +223,7 @@ class AlertWatcher:
                 "channel": "sms", "level": alert.get("threat_level"),
                 "ai_summary": bool(sms_summary),
             }
+            logger.info("SMS dispatch → %s ok=%s", rec["value"], ok)
 
     # ── Status ───────────────────────────────────────────────────────────────
 
@@ -187,6 +231,7 @@ class AlertWatcher:
         return {
             "running": bool(self._thread and self._thread.is_alive()),
             "poll_interval": self.poll_interval,
+            "min_dispatch_interval": MIN_DISPATCH_INTERVAL,
             "last_dispatches": self._last_dispatch,
         }
 

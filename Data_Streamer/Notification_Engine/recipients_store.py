@@ -48,6 +48,11 @@ class RecipientsStore:
     # ── Recipients ────────────────────────────────────────────────────────────
 
     def add_recipient(self, email: str, rec_type: str, value: str, label: str = "") -> Dict:
+        # Dedup: return existing record if same type+value already registered.
+        for existing in self.list_recipients(email):
+            if existing.get("type") == rec_type and existing.get("value") == value:
+                return existing
+
         rec_id = uuid.uuid4().hex[:12]
         rec = {
             "id": rec_id,

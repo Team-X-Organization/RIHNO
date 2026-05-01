@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState, Component } from 'react';
 import { Environment, ScrollControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import Model from "../components/Model.jsx";
@@ -7,18 +7,28 @@ import { ArrowRight, ShieldCheck, Zap } from 'lucide-react';
 import { backendConfig } from "../authConfig.js";
 import axios from 'axios';
 
+class CanvasErrorBoundary extends Component {
+    constructor(props) {
+        super(props);
+        this.state = { failed: false };
+    }
+    static getDerivedStateFromError() {
+        return { failed: true };
+    }
+    render() {
+        if (this.state.failed) return null;
+        return this.props.children;
+    }
+}
+
 function Home() {
-    // Check backend (node.js) is ready
     const [data, setData] = useState("");
-    // Call the backend API and update the status
     useEffect(() => {
-        // call express js api using axios
         axios.get(`${backendConfig.backendURL}api/backend_check`)
             .then(response => { setData(response.data.message); })
             .catch(error => { console.error("There was an error fetching the data!", error); })
     }, []);
 
-    // Return the Home page
     return (
         <div className="relative w-full min-h-screen bg-white overflow-hidden flex flex-col">
             <div className="relative lg:absolute inset-0 z-10 w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 xl:px-16 flex items-center pt-16 sm:pt-20 md:pt-24 pb-8 sm:pb-12 lg:pb-32 pointer-events-none">
@@ -75,25 +85,24 @@ function Home() {
                 </div>
             </div>
 
-            {/* --- 3D SCENE --- */}
-            <div className="absolute inset-0 z-0 h-full">
-                <Canvas camera={{ position: [0, 0, 5], fov: 40 }}>
-                    <ambientLight intensity={0.7} />
-                    <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} intensity={1.5} castShadow />
-                    <directionalLight position={[-5, 5, -5]} intensity={0.5} color="white" />
+            {/* 3D SCENE — isolated in error boundary; WebGL unavailable in some Docker envs */}
+            <CanvasErrorBoundary>
+                <div className="absolute inset-0 z-0 h-full">
+                    <Canvas camera={{ position: [0, 0, 5], fov: 40 }}>
+                        <ambientLight intensity={0.7} />
+                        <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} intensity={1.5} castShadow />
+                        <directionalLight position={[-5, 5, -5]} intensity={0.5} color="white" />
 
-                    <Suspense fallback={null}>
-                        {/* pages={3}: Defines the scrollable height.
-                            damping={0.2}: Makes the movement feel smooth and heavy.
-                        */}
-                        <ScrollControls pages={2} damping={0.15}>
-                            <Model />
-                        </ScrollControls>
-                    </Suspense>
+                        <Suspense fallback={null}>
+                            <ScrollControls pages={2} damping={0.15}>
+                                <Model />
+                            </ScrollControls>
+                        </Suspense>
 
-                    <Environment preset="city" />
-                </Canvas>
-            </div>
+                        <Environment preset="city" />
+                    </Canvas>
+                </div>
+            </CanvasErrorBoundary>
         </div>
     );
 }

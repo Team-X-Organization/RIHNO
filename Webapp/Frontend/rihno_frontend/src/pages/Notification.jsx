@@ -27,6 +27,31 @@ const LEVEL_TEXT = {
     critical: 'text-white',
 };
 
+// Hex used for the left accent stripe — kept separate from LEVEL_BG so we can
+// drive `border-left` via inline style (Tailwind cannot interpolate hex).
+const LEVEL_ACCENT_HEX = {
+    normal: '#CEFFBC',
+    low: '#CEFFBC',
+    medium: '#FFECA0',
+    high: '#FF6B6B',
+    critical: '#FF6B6B',
+};
+
+const LAYER_TOOLTIPS = {
+    statistical: 'Statistical: outlier detection on rolling network metrics.',
+    isolation_forest: 'Isolation Forest: tree-based anomaly score across feature space.',
+    autoencoder: 'Autoencoder: deep model reconstruction error on normal baseline.',
+    network_analyzer: 'Network: graph-traffic anomaly across host relationships.',
+};
+
+// Pull a 1-line headline out of a multi-sentence Bedrock summary.
+function aiHeadline(text) {
+    if (!text) return '';
+    const firstStop = text.indexOf('. ');
+    const head = firstStop > 0 ? text.slice(0, firstStop + 1) : text;
+    return head.replace(/\s+/g, ' ').trim().slice(0, 110);
+}
+
 function api(path) {
     return `${backendConfig.backendURL}${path.replace(/^\//, '')}`;
 }
@@ -214,8 +239,25 @@ function Notification() {
 
     // Prefer the direct AI engine summary (per-agent last_assessment).
     // Fall back to notification engine view when not yet available.
+    // Merge Bedrock ai_summary text from notification engine into each agent card.
     const summaryAgents = aiSummary?.agents || [];
-    const aiAgents = summaryAgents.length > 0 ? summaryAgents : (aiThreats?.agents || []);
+    const notifyAgentMap = useMemo(() => {
+        const m = {};
+        for (const a of (aiThreats?.agents || [])) {
+            if (a.agent_id) m[a.agent_id] = a.ai_summary || '';
+        }
+        return m;
+    }, [aiThreats]);
+
+    const aiAgents = useMemo(() => {
+        if (summaryAgents.length > 0) {
+            return summaryAgents.map(a => ({
+                ...a,
+                ai_summary: a.ai_summary || notifyAgentMap[a.agent_name] || notifyAgentMap[a.agent_id] || '',
+            }));
+        }
+        return aiThreats?.agents || [];
+    }, [summaryAgents, aiThreats, notifyAgentMap]);
 
     const overallLevel = useMemo(() => {
         if (summaryAgents.length === 0) return aiThreats?.summary?.max_level || 'normal';
@@ -365,13 +407,34 @@ function ThreatsView({ overallLevel, aiAgents, autoDetector, hasSummary }) {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                    {aiAgents.map((t, idx) => (
-                        hasSummary
-                            ? <AgentThreatCard key={idx} agent={t} />
-                            : <LegacyThreatCard key={idx} t={t} />
-                    ))}
+                    {[...aiAgents]
+                        .sort((a, b) => {
+                            const la = a.last_assessment?.threat_level || a.threat_level || 'normal';
+                            const lb = b.last_assessment?.threat_level || b.threat_level || 'normal';
+                            return (THREAT_RANK[lb] || 0) - (THREAT_RANK[la] || 0);
+                        })
+                        .map((t, idx) => (
+                            hasSummary
+                                ? <AgentThreatCard key={idx} agent={t} />
+                                : <LegacyThreatCard key={idx} t={t} />
+                        ))}
                 </div>
             )}
+        </div>
+    );
+}
+
+function AiSummaryBlock({ summary }) {
+    if (!summary) return null;
+    return (
+        <div className="pt-2 border-t-2 border-dashed border-gray-300">
+            <p className="font-black uppercase text-gray-700 mb-1 flex items-center gap-1">
+                <BrainCircuit size={14} /> AI Analyst Summary
+                <span className="ml-1 text-[10px] font-mono font-bold text-gray-400 normal-case">AWS Nova Lite</span>
+            </p>
+            <div className="bg-[#f4f0ff] border-2 border-black p-2 text-xs leading-relaxed whitespace-pre-wrap font-sans">
+                {summary}
+            </div>
         </div>
     );
 }
@@ -385,8 +448,9 @@ function AgentThreatCard({ agent }) {
     const status = agent.status || {};
     const samples = status.samples_processed || 0;
     const layerStatus = status.layers || {};
+    const aiSummary = agent.ai_summary || last.ai_summary || '';
+    const headline = aiHeadline(aiSummary);
 
-    // layer_contributions = { name: { score, weight, contribution, active } }
     const layerInfo = (lyr) => {
         const v = layers[lyr];
         if (!v || typeof v !== 'object') return { score: 0, contribution: 0, active: false };
@@ -398,72 +462,95 @@ function AgentThreatCard({ agent }) {
     };
 
     return (
-        <div className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000]">
-            <div className={`p-4 border-b-4 border-black flex items-center justify-between ${LEVEL_BG[level]} ${LEVEL_TEXT[level]}`}>
-                <div className="flex items-center gap-2 min-w-0">
-                    <AlertTriangle size={24} className="shrink-0" />
-                    <div className="min-w-0">
-                        <h3 className="font-black uppercase text-lg sm:text-xl truncate">{agent.agent_name}</h3>
-                        <p className="font-mono text-xs uppercase opacity-80">{level}</p>
+        <div
+            className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000]"
+            style={{ borderLeftWidth: '12px', borderLeftColor: LEVEL_ACCENT_HEX[level] }}
+        >
+            <div className={`p-4 border-b-4 border-black ${LEVEL_BG[level]} ${LEVEL_TEXT[level]}`}>
+                <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <AlertTriangle size={24} className="shrink-0" />
+                        <div className="min-w-0">
+                            <h3 className="font-black uppercase text-lg sm:text-xl truncate">{agent.agent_name}</h3>
+                            <p className="font-mono text-xs uppercase opacity-80">{level}</p>
+                        </div>
                     </div>
+                    <span className="font-mono text-xs font-black uppercase px-2 py-1 border-2 border-black bg-white text-black shrink-0">
+                        Score {score.toFixed(3)}
+                    </span>
                 </div>
-                <span className="font-mono text-xs font-black uppercase px-2 py-1 border-2 border-black bg-white text-black shrink-0">
-                    Score {score.toFixed(3)}
-                </span>
-            </div>
-
-            <div className="p-4 space-y-3 font-mono text-xs sm:text-sm">
-                <div className="space-y-2">
-                    <p className="font-black uppercase text-gray-700">Layer Scores</p>
-                    {[
-                        ['Statistical', 'statistical', layerStatus.statistical],
-                        ['Iso. Forest', 'isolation_forest', layerStatus.isolation_forest],
-                        ['Autoencoder', 'autoencoder', layerStatus.autoencoder],
-                        ['Network', 'network_analyzer', layerStatus.network_analyzer],
-                    ].map(([label, key, st]) => {
-                        const info = layerInfo(key);
-                        return (
-                            <LayerBar
-                                key={key}
-                                label={label}
-                                value={info.score}
-                                active={info.active && (st?.active !== false)}
-                            />
-                        );
-                    })}
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t-2 border-dashed border-gray-300">
-                    <Stat label="Samples" value={samples} />
-                    <Stat label="Stream" value={agent.stream_length || 0} />
-                    <Stat label="Alerts" value={recentAlerts.length} />
-                    <Stat label="Last" value={agent.last_metric_ts ? new Date(agent.last_metric_ts).toLocaleTimeString() : '—'} />
-                </div>
-
-                {recentAlerts.length > 0 && (
-                    <div className="pt-2 border-t-2 border-dashed border-gray-300">
-                        <p className="font-black uppercase text-gray-700 mb-2">Recent Alerts</p>
-                        <ul className="space-y-1 max-h-40 overflow-auto">
-                            {recentAlerts.slice(0, 5).map((al, i) => (
-                                <li key={i} className={`flex items-center justify-between gap-2 px-2 py-1 border-2 border-black ${LEVEL_BG[al.threat_level || 'low']} ${LEVEL_TEXT[al.threat_level || 'low']}`}>
-                                    <span className="font-black uppercase truncate">{al.threat_level}</span>
-                                    <span className="font-mono">{(al.final_score || 0).toFixed(2)}</span>
-                                    <span className="font-mono opacity-80 truncate">{al.timestamp ? new Date(al.timestamp).toLocaleTimeString() : '—'}</span>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
+                {headline && (
+                    <p className="mt-3 font-mono text-xs sm:text-sm font-bold leading-snug border-t-2 border-black/40 pt-2">
+                        ▸ {headline}
+                    </p>
                 )}
             </div>
+
+            <details className="p-4 font-mono text-xs sm:text-sm group">
+                <summary className="cursor-pointer font-black uppercase text-gray-700 select-none flex items-center justify-between hover:text-black">
+                    <span className="flex items-center gap-2">
+                        <BrainCircuit size={14} /> Details
+                    </span>
+                    <span className="font-mono text-[10px] text-gray-500 group-open:hidden">expand ▼</span>
+                    <span className="font-mono text-[10px] text-gray-500 hidden group-open:inline">collapse ▲</span>
+                </summary>
+
+                <div className="space-y-3 pt-3">
+                    <div className="space-y-2">
+                        <p className="font-black uppercase text-gray-700">Layer Scores</p>
+                        {[
+                            ['Statistical', 'statistical', layerStatus.statistical],
+                            ['Iso. Forest', 'isolation_forest', layerStatus.isolation_forest],
+                            ['Autoencoder', 'autoencoder', layerStatus.autoencoder],
+                            ['Network', 'network_analyzer', layerStatus.network_analyzer],
+                        ].map(([label, key, st]) => {
+                            const info = layerInfo(key);
+                            return (
+                                <LayerBar
+                                    key={key}
+                                    label={label}
+                                    value={info.score}
+                                    active={info.active && (st?.active !== false)}
+                                    tooltip={LAYER_TOOLTIPS[key]}
+                                />
+                            );
+                        })}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t-2 border-dashed border-gray-300">
+                        <Stat label="Samples" value={samples} />
+                        <Stat label="Stream" value={agent.stream_length || 0} />
+                        <Stat label="Alerts" value={recentAlerts.length} />
+                        <Stat label="Last" value={agent.last_metric_ts ? new Date(agent.last_metric_ts).toLocaleTimeString() : '—'} />
+                    </div>
+
+                    {recentAlerts.length > 0 && (
+                        <div className="pt-2 border-t-2 border-dashed border-gray-300">
+                            <p className="font-black uppercase text-gray-700 mb-2">Recent Alerts</p>
+                            <ul className="space-y-1 max-h-40 overflow-auto">
+                                {recentAlerts.slice(0, 5).map((al, i) => (
+                                    <li key={i} className={`flex items-center justify-between gap-2 px-2 py-1 border-2 border-black ${LEVEL_BG[al.threat_level || 'low']} ${LEVEL_TEXT[al.threat_level || 'low']}`}>
+                                        <span className="font-black uppercase truncate">{al.threat_level}</span>
+                                        <span className="font-mono">{(al.final_score || 0).toFixed(2)}</span>
+                                        <span className="font-mono opacity-80 truncate">{al.timestamp ? new Date(al.timestamp).toLocaleTimeString() : '—'}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    <AiSummaryBlock summary={aiSummary} />
+                </div>
+            </details>
         </div>
     );
 }
 
-function LayerBar({ label, value, active }) {
+function LayerBar({ label, value, active, tooltip }) {
     const pct = Math.round(value * 100);
     return (
-        <div className="flex items-center gap-2">
-            <span className="w-24 shrink-0 font-bold uppercase">{label}</span>
+        <div className="flex items-center gap-2" title={tooltip}>
+            <span className="w-24 shrink-0 font-bold uppercase cursor-help underline decoration-dotted decoration-gray-400 underline-offset-2">{label}</span>
             <div className="flex-1 h-3 border-2 border-black bg-white relative">
                 <div
                     className={`h-full ${active ? 'bg-black' : 'bg-gray-300'}`}
@@ -487,26 +574,39 @@ function Stat({ label, value }) {
 
 function LegacyThreatCard({ t }) {
     const level = t.threat_level || 'normal';
+    const aiSummary = t.ai_summary || '';
+    const headline = aiHeadline(aiSummary);
     return (
-        <div className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000]">
-            <div className={`p-4 border-b-4 border-black flex items-center justify-between ${LEVEL_BG[level]} ${LEVEL_TEXT[level]}`}>
-                <div className="flex items-center gap-2">
-                    <AlertTriangle size={24} />
-                    <h3 className="font-black uppercase text-lg sm:text-xl">{level}</h3>
+        <div
+            className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000]"
+            style={{ borderLeftWidth: '12px', borderLeftColor: LEVEL_ACCENT_HEX[level] }}
+        >
+            <div className={`p-4 border-b-4 border-black ${LEVEL_BG[level]} ${LEVEL_TEXT[level]}`}>
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <AlertTriangle size={24} />
+                        <h3 className="font-black uppercase text-lg sm:text-xl">{level}</h3>
+                    </div>
+                    <span className="font-mono text-xs font-black uppercase px-2 py-1 border-2 border-black bg-white text-black">
+                        Score {(t.final_score || 0).toFixed(2)}
+                    </span>
                 </div>
-                <span className="font-mono text-xs font-black uppercase px-2 py-1 border-2 border-black bg-white text-black">
-                    Score {(t.final_score || 0).toFixed(2)}
-                </span>
+                {headline && (
+                    <p className="mt-3 font-mono text-xs sm:text-sm font-bold leading-snug border-t-2 border-black/40 pt-2">
+                        ▸ {headline}
+                    </p>
+                )}
             </div>
             <div className="p-4 font-mono text-sm space-y-2">
                 <div className="flex justify-between border-b-2 border-dashed border-gray-300 pb-2">
                     <span className="font-bold text-gray-500 uppercase">Agent</span>
                     <span className="font-black truncate ml-2">{t.agent_id}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between border-b-2 border-dashed border-gray-300 pb-2">
                     <span className="font-bold text-gray-500 uppercase">Time</span>
                     <span className="font-black">{t.timestamp || '—'}</span>
                 </div>
+                <AiSummaryBlock summary={aiSummary} />
             </div>
         </div>
     );

@@ -25,6 +25,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import senders
+import bedrock_summarizer
 from alert_watcher import AlertWatcher, THREAT_RANK
 from recipients_store import RecipientsStore
 from senders import (
@@ -65,8 +67,47 @@ ids_redis = redis.Redis(
 watcher = AlertWatcher(ids_redis=ids_redis, store=store)
 
 
+def _log_config_status() -> None:
+    """Boot-time visibility into which dispatch channels are wired up.
+    Logs one WARNING per missing channel so operators see the cause of
+    silent skips immediately rather than hunting through dispatch logs.
+    """
+    if not senders.SMTP_USER or not senders.SMTP_PASS:
+        missing = [n for n, v in (("SMTP_USER", senders.SMTP_USER), ("SMTP_PASS", senders.SMTP_PASS)) if not v]
+        logger.warning(
+            "SMTP not configured (%s empty) — email dispatch will be skipped",
+            ", ".join(missing),
+        )
+    else:
+        logger.info("SMTP configured (host=%s user=%s)", senders.SMTP_HOST, senders.SMTP_USER)
+
+    if not (senders.TWILIO_SID and senders.TWILIO_TOKEN and senders.TWILIO_FROM):
+        missing = [
+            n for n, v in (
+                ("TWILIO_ACCOUNT_SID", senders.TWILIO_SID),
+                ("TWILIO_AUTH_TOKEN", senders.TWILIO_TOKEN),
+                ("TWILIO_FROM_NUMBER", senders.TWILIO_FROM),
+            ) if not v
+        ]
+        logger.warning(
+            "Twilio not configured (%s empty) — SMS dispatch will be skipped",
+            ", ".join(missing),
+        )
+    else:
+        logger.info("Twilio configured (from=%s)", senders.TWILIO_FROM)
+
+    # Eager-init Bedrock so init failures surface at startup, not first alert.
+    if bedrock_summarizer.DISABLED:
+        logger.warning("Bedrock summarizer disabled via BEDROCK_SUMMARY_DISABLED — alerts will dispatch without AI summary")
+    elif bedrock_summarizer._get_client() is None:
+        logger.warning(
+            "Bedrock summarizer disabled (boto3/AWS creds unavailable) — alerts will dispatch without AI summary"
+        )
+
+
 @app.on_event("startup")
 def _startup():
+    _log_config_status()
     watcher.start()
 
 
@@ -231,6 +272,7 @@ def threats_for_user(email: str):
                 "threat_level": alert.get("threat_level", "normal"),
                 "final_score": alert.get("final_score", 0),
                 "timestamp": alert.get("timestamp", ""),
+                "ai_summary": "",
             })
 
     summary = {

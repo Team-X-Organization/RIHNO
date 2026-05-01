@@ -9,7 +9,6 @@ const credentialsMiddleware = () => ({
     server.middlewares.use('/api/credentials', async (req, res, next) => {
       if (req.url === '/') {
         try {
-          // This executes in Node.js (Vite server process), so it can read ~/.aws/credentials
           const credentials = await fromNodeProviderChain()();
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({
