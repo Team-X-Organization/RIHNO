@@ -88,19 +88,25 @@ const Agent_List = () => {
         const email = auth.user?.profile?.email;
         if (!email) return;
 
+        const controller = new AbortController();
         const fetchStatuses = async () => {
             try {
-                const { data } = await axios.get(`${backendConfig.dealerURL}/agents/status`, { params: { email } });
+                const { data } = await axios.get(`${backendConfig.dealerURL}/agents/status`, {
+                    params: { email },
+                    signal: controller.signal,
+                });
                 const statusMap = {};
-                if (data) {
-                    data.forEach(s => statusMap[s.agent_name] = s);
-                }
+                if (data) data.forEach(s => statusMap[s.agent_name] = s);
                 setAgentStatuses(statusMap);
-            } catch (err) { }
+            } catch (err) {
+                if (!axios.isCancel(err)) {
+                    console.warn('[Agent_List] agent status fetch failed:', err.message);
+                }
+            }
         };
         fetchStatuses();
         const id = setInterval(fetchStatuses, 10000);
-        return () => clearInterval(id);
+        return () => { clearInterval(id); controller.abort(); };
     }, [auth.user?.profile?.email]);
 
     // Fetch agent list
@@ -108,10 +114,17 @@ const Agent_List = () => {
         const email = auth.user?.profile?.email;
         if (!email) return;
         setLoading(true);
-        axios.get(`${backendConfig.backendURL}api/list_all_devices`, { params: { email } })
-            .then(r => setServers(r.data))
-            .catch(e => console.error(e))
+        const controller = new AbortController();
+        axios.get(`${backendConfig.backendURL}api/list_all_devices`, {
+            params: { email },
+            signal: controller.signal,
+        })
+            .then(r => setServers(Array.isArray(r.data) ? r.data : []))
+            .catch(e => {
+                if (!axios.isCancel(e)) console.error('[Agent_List] device list fetch failed:', e.message);
+            })
             .finally(() => setLoading(false));
+        return () => controller.abort();
     }, [auth.user?.profile?.email]);
 
     // Fetch full metrics for each agent, refresh every 10 s
@@ -119,21 +132,43 @@ const Agent_List = () => {
         const email = auth.user?.profile?.email;
         if (!email || servers.length === 0) return;
 
-        const fetchAll = () => {
-            servers.forEach(async s => {
-                try {
-                    const { data: d } = await axios.get(`${backendConfig.dealerURL}/metrics/latest_full`, {
-                        params: { email, device_name: s.DeviceName }
-                    });
-                    setMetrics(prev => ({ ...prev, [s.DeviceName]: d }));
-                } catch {
-                    // keep previous or leave empty
+        let inFlight = false;
+        const controller = new AbortController();
+
+        const fetchAll = async () => {
+            if (inFlight) return; // skip if previous batch still running
+            inFlight = true;
+            try {
+                const results = await Promise.allSettled(
+                    servers.map(s =>
+                        axios.get(`${backendConfig.dealerURL}/metrics/latest_full`, {
+                            params: { email, device_name: s.DeviceName },
+                            signal: controller.signal,
+                        }).then(r => ({ name: s.DeviceName, data: r.data }))
+                    )
+                );
+                const update = {};
+                let failures = 0;
+                results.forEach(r => {
+                    if (r.status === 'fulfilled') {
+                        update[r.value.name] = r.value.data;
+                    } else if (!axios.isCancel(r.reason)) {
+                        failures += 1;
+                    }
+                });
+                if (Object.keys(update).length) {
+                    setMetrics(prev => ({ ...prev, ...update }));
                 }
-            });
+                if (failures > 0) {
+                    console.warn(`[Agent_List] ${failures}/${servers.length} metric fetches failed`);
+                }
+            } finally {
+                inFlight = false;
+            }
         };
         fetchAll();
         const id = setInterval(fetchAll, 10000);
-        return () => clearInterval(id);
+        return () => { clearInterval(id); controller.abort(); };
     }, [servers, auth.user?.profile?.email]);
 
     const enrichedServers = servers.map(server => {

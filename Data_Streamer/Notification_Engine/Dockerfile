@@ -14,7 +14,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY recipients_store.py senders.py alert_watcher.py main.py ./
+COPY recipients_store.py senders.py alert_watcher.py bedrock_summarizer.py main.py ./
 
 RUN groupadd -r rihno && useradd -r -g rihno rihno && chown -R rihno:rihno /app
 USER rihno
@@ -26,7 +26,9 @@ ENV REDIS_HOST=my_rihno_redis \
     REDIS_DB=0 \
     SMTP_HOST=smtp.gmail.com \
     SMTP_PORT=587 \
-    SMTP_USE_TLS=true
+    SMTP_USE_TLS=true \
+    AWS_REGION=us-east-1 \
+    BEDROCK_MODEL_ID=amazon.nova-lite-v1:0
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5060/health')" || exit 1

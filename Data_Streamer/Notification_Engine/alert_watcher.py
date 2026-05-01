@@ -20,6 +20,7 @@ from senders import (
     build_alert_body, build_alert_html, build_alert_subject,
     build_sms_body, send_email, send_sms,
 )
+from bedrock_summarizer import summarize_alert
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +151,17 @@ class AlertWatcher:
 
     def _dispatch(self, email: str, alert: Dict) -> None:
         subject = build_alert_subject(alert)
-        body = build_alert_body(alert)
-        html = build_alert_html(alert)
-        sms_body = build_sms_body(alert)
+
+        # Generate Nova Lite explanation once per alert. Returns None on
+        # any failure (boto3 missing, AWS creds missing, model error) — the
+        # notification still goes out with raw metrics intact.
+        summary = summarize_alert(alert)
+        email_summary = summary.get("email_summary", "") if summary else ""
+        sms_summary = summary.get("sms_summary", "") if summary else ""
+
+        body = build_alert_body(alert, ai_summary=email_summary)
+        html = build_alert_html(alert, ai_summary=email_summary)
+        sms_body = build_sms_body(alert, ai_summary=sms_summary)
 
         emails = self.store.get_enabled_by_type(email, "email")
         for rec in emails:
@@ -160,6 +169,7 @@ class AlertWatcher:
             self._last_dispatch[rec["value"]] = {
                 "ok": ok, "info": info, "ts": int(time.time()),
                 "channel": "email", "level": alert.get("threat_level"),
+                "ai_summary": bool(email_summary),
             }
 
         phones = self.store.get_enabled_by_type(email, "sms")
@@ -168,6 +178,7 @@ class AlertWatcher:
             self._last_dispatch[rec["value"]] = {
                 "ok": ok, "info": info, "ts": int(time.time()),
                 "channel": "sms", "level": alert.get("threat_level"),
+                "ai_summary": bool(sms_summary),
             }
 
     # ── Status ───────────────────────────────────────────────────────────────

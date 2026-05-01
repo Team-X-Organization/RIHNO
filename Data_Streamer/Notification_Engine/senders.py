@@ -90,7 +90,7 @@ def build_alert_subject(alert: dict) -> str:
     return f"[RIHNO] {level} threat on {agent}"
 
 
-def build_alert_body(alert: dict) -> str:
+def build_alert_body(alert: dict, ai_summary: str = "") -> str:
     lines = [
         "RIHNO Intrusion Detection Alert",
         "================================",
@@ -115,11 +115,27 @@ def build_alert_body(alert: dict) -> str:
             lines.append(f"  - {n}")
         lines.append("")
 
+    if ai_summary:
+        lines.append("AI Analyst Summary (Nova Lite):")
+        lines.append("--------------------------------")
+        lines.append(ai_summary.strip())
+        lines.append("")
+
     lines.append("Open the RIHNO dashboard for full context.")
     return "\n".join(lines)
 
 
-def build_alert_html(alert: dict) -> str:
+def _esc(value) -> str:
+    """Minimal HTML escape for user-influenced text in email bodies."""
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def build_alert_html(alert: dict, ai_summary: str = "") -> str:
     level = (alert.get("threat_level") or "unknown").upper()
     color = {
         "CRITICAL": "#FF6B6B",
@@ -134,7 +150,16 @@ def build_alert_html(alert: dict) -> str:
     def list_html(items):
         if not items:
             return "<em>none</em>"
-        return "<ul>" + "".join(f"<li>{i}</li>" for i in items[:8]) + "</ul>"
+        return "<ul>" + "".join(f"<li>{_esc(i)}</li>" for i in items[:8]) + "</ul>"
+
+    ai_block = ""
+    if ai_summary:
+        ai_block = f"""
+        <div style="margin-top:16px; padding:12px; background:#f4f0ff; border:3px solid #000;">
+          <div style="font-weight:900; text-transform:uppercase; font-size:12px; margin-bottom:6px;">AI Analyst Summary &mdash; AWS Nova Lite</div>
+          <div style="font-size:14px; line-height:1.5; white-space:pre-wrap;">{_esc(ai_summary)}</div>
+        </div>
+        """
 
     return f"""
     <div style="font-family: monospace; max-width:600px; border:4px solid #000;">
@@ -144,17 +169,23 @@ def build_alert_html(alert: dict) -> str:
       </div>
       <div style="padding:16px;">
         <p><strong>Score:</strong> {alert.get('final_score', 0):.3f}</p>
-        <p><strong>Agent:</strong> {alert.get('agent_id') or alert.get('agent_name','?')}</p>
-        <p><strong>Time:</strong> {alert.get('timestamp','?')}</p>
+        <p><strong>Agent:</strong> {_esc(alert.get('agent_id') or alert.get('agent_name','?'))}</p>
+        <p><strong>Time:</strong> {_esc(alert.get('timestamp','?'))}</p>
         <h3>Critical</h3>{list_html(crit)}
         <h3>Network</h3>{list_html(net)}
+        {ai_block}
       </div>
     </div>
     """
 
 
-def build_sms_body(alert: dict) -> str:
+def build_sms_body(alert: dict, ai_summary: str = "") -> str:
     level = (alert.get("threat_level") or "?").upper()
     agent = alert.get("agent_id") or alert.get("agent_name") or "agent"
     score = alert.get("final_score", 0)
-    return f"RIHNO {level} on {agent} score={score:.2f}"
+    metric_line = f"RIHNO {level} {agent} s={score:.2f}"
+    if ai_summary:
+        # Hard cap so total stays <= ~300 chars (most carriers concatenate)
+        clipped = ai_summary.strip().replace("\n", " ")[:140]
+        return f"{metric_line} | {clipped}"
+    return metric_line

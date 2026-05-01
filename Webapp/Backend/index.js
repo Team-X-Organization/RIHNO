@@ -24,8 +24,24 @@ const AWS_API_URL = process.env.AWS_DEVICE_API_URL;
 const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://my_rihno_ai_engine:4050';
 const NOTIFY_ENGINE_URL = process.env.NOTIFY_ENGINE_URL || 'http://my_rihno_notify:5060';
 
-app.use(cors());
-app.use(express.json());
+// CORS — allow specific origins via FRONTEND_URL (comma-separated). In dev,
+// fall back to permissive so the Vite dev server still works.
+const allowedOrigins = (process.env.FRONTEND_URL || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow same-origin / curl / server-to-server (no Origin header)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.length === 0) return callback(null, true); // dev fallback
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error(`CORS: origin ${origin} not allowed`));
+    },
+    credentials: true,
+}));
+app.use(express.json({ limit: '1mb' }));
 
 // Root route
 app.get('/', (req, res) => {
@@ -73,44 +89,61 @@ app.get('/api/cli_auth', async (req, res) => {
 const kafkaBroker = process.env.KAFKA_BROKER || 'localhost:9092';
 const kafka = new Kafka({
     clientId: 'my-app',
-    brokers: [kafkaBroker] // Replaced with env variable
+    brokers: [kafkaBroker]
 });
 
+// Single shared producer — connect once, reuse for every request.
+// kafkajs is idempotent on connect() but new connections per request leak sockets.
 const producer = kafka.producer();
+let producerReady = false;
+let producerConnecting = null;
+
+async function ensureProducerConnected() {
+    if (producerReady) return;
+    if (!producerConnecting) {
+        producerConnecting = producer.connect()
+            .then(() => { producerReady = true; })
+            .catch(err => { producerConnecting = null; throw err; });
+    }
+    return producerConnecting;
+}
+
+// Disconnect producer cleanly on shutdown so the broker frees its session
+async function shutdown(signal) {
+    console.log(`Received ${signal}, closing producer...`);
+    try { if (producerReady) await producer.disconnect(); } catch (e) { console.error('producer disconnect failed:', e.message); }
+    process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // kafka producer cli
 app.post('/api/cli/produce_data', async (req, res) => {
     try {
-        // 1. Change req.query to req.body to catch the JSON you provided
         const data = req.body;
-
-        console.log("Received data:", data["CONFIG"]["isAuth"]);
-
-        let isAuth = data["CONFIG"]["isAuth"] || "false";
-        if (isAuth === "false") {
-            res.status(400).json({
+        if (!data || typeof data !== 'object') {
+            return res.status(400).json({ status: 'error', message: 'JSON body required' });
+        }
+        const isAuth = data?.CONFIG?.isAuth ?? "false";
+        if (String(isAuth) === "false") {
+            return res.status(400).json({
                 status: 'error',
                 message: 'Authentication Error',
-                details: data["CONFIG"]["isAuth"]
-            })
-        } else {
-            // 2. Connect and Send to Kafka
-            await producer.connect();
-            await producer.send({
-                topic: 'rihno_logs',
-                messages: [
-                    { value: JSON.stringify(data) },
-                ],
-            });
-
-            res.status(200).json({
-                status: "Success",
-                message: "Data sent to Kafka",
-                sentData: data
+                details: isAuth,
             });
         }
 
+        await ensureProducerConnected();
+        await producer.send({
+            topic: 'rihno_logs',
+            messages: [{ value: JSON.stringify(data) }],
+        });
 
+        res.status(200).json({
+            status: "Success",
+            message: "Data sent to Kafka",
+            sentData: data,
+        });
     } catch (error) {
         console.error("Kafka Producer Error:", error.message);
         res.status(500).json({
@@ -359,6 +392,17 @@ function forwardAxiosError(error, res, fallbackMessage) {
     });
 }
 
+// RFC-5322-lite email regex. Reject anything before forwarding so an attacker
+// cannot smuggle path/URL fragments into proxied paths.
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+function badEmail(email, res) {
+    if (!email || typeof email !== 'string' || !EMAIL_RE.test(email) || email.length > 254) {
+        res.status(400).json({ status: 'error', message: 'invalid email' });
+        return true;
+    }
+    return false;
+}
+
 // Global AI engine status (all agents + global stats)
 app.get('/api/ai/status', async (req, res) => {
     try {
@@ -373,7 +417,7 @@ app.get('/api/ai/status', async (req, res) => {
 app.get('/api/ai/agents/:agentName/status', async (req, res) => {
     const { email } = req.query;
     const { agentName } = req.params;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.get(
             `${AI_ENGINE_URL}/agents/${encodeURIComponent(email)}/${encodeURIComponent(agentName)}/status`,
@@ -389,7 +433,7 @@ app.get('/api/ai/agents/:agentName/status', async (req, res) => {
 app.get('/api/ai/agents/:agentName/alerts', async (req, res) => {
     const { email, count = 50 } = req.query;
     const { agentName } = req.params;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.get(
             `${AI_ENGINE_URL}/agents/${encodeURIComponent(email)}/${encodeURIComponent(agentName)}/alerts`,
@@ -417,7 +461,7 @@ app.get('/api/ai/alerts', async (req, res) => {
 // Per-user threat summary (last assessment + alerts + status, all agents)
 app.get('/api/ai/threat_summary', async (req, res) => {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.get(`${AI_ENGINE_URL}/threat_summary`, {
             params: { email },
@@ -443,7 +487,7 @@ app.get('/api/ai/auto_detector/status', async (req, res) => {
 app.post('/api/ai/detect/:agentName', async (req, res) => {
     const { email } = req.query;
     const { agentName } = req.params;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.post(
             `${AI_ENGINE_URL}/detect/${encodeURIComponent(email)}/${encodeURIComponent(agentName)}`,
@@ -461,7 +505,7 @@ app.post('/api/ai/detect/:agentName', async (req, res) => {
 // Threat status summary (per-user, derived from AI engine)
 app.get('/api/notify/threats', async (req, res) => {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.get(
             `${NOTIFY_ENGINE_URL}/threats/${encodeURIComponent(email)}`,
@@ -476,7 +520,7 @@ app.get('/api/notify/threats', async (req, res) => {
 // List recipients
 app.get('/api/notify/recipients', async (req, res) => {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.get(
             `${NOTIFY_ENGINE_URL}/recipients/${encodeURIComponent(email)}`,
@@ -491,7 +535,7 @@ app.get('/api/notify/recipients', async (req, res) => {
 // Add recipient
 app.post('/api/notify/recipients', async (req, res) => {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.post(
             `${NOTIFY_ENGINE_URL}/recipients/${encodeURIComponent(email)}`,
@@ -508,7 +552,7 @@ app.post('/api/notify/recipients', async (req, res) => {
 app.patch('/api/notify/recipients/:recId', async (req, res) => {
     const { email } = req.query;
     const { recId } = req.params;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.patch(
             `${NOTIFY_ENGINE_URL}/recipients/${encodeURIComponent(email)}/${encodeURIComponent(recId)}`,
@@ -525,7 +569,7 @@ app.patch('/api/notify/recipients/:recId', async (req, res) => {
 app.delete('/api/notify/recipients/:recId', async (req, res) => {
     const { email } = req.query;
     const { recId } = req.params;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.delete(
             `${NOTIFY_ENGINE_URL}/recipients/${encodeURIComponent(email)}/${encodeURIComponent(recId)}`,
@@ -540,7 +584,7 @@ app.delete('/api/notify/recipients/:recId', async (req, res) => {
 // Settings
 app.get('/api/notify/settings', async (req, res) => {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.get(
             `${NOTIFY_ENGINE_URL}/settings/${encodeURIComponent(email)}`,
@@ -554,7 +598,7 @@ app.get('/api/notify/settings', async (req, res) => {
 
 app.put('/api/notify/settings', async (req, res) => {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.put(
             `${NOTIFY_ENGINE_URL}/settings/${encodeURIComponent(email)}`,
@@ -570,7 +614,7 @@ app.put('/api/notify/settings', async (req, res) => {
 // Test send
 app.post('/api/notify/test', async (req, res) => {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ status: 'error', message: 'email required' });
+    if (badEmail(email, res)) return;
     try {
         const response = await axios.post(
             `${NOTIFY_ENGINE_URL}/test/${encodeURIComponent(email)}`,

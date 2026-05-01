@@ -54,6 +54,7 @@ function Notification() {
     const [actionLoading, setActionLoading] = useState(false);
 
     const [loading, setLoading] = useState(true);
+    const [fetchErrors, setFetchErrors] = useState([]);
 
     const showMsg = (kind, text) => {
         setActionMsg({ kind, text });
@@ -64,14 +65,23 @@ function Notification() {
 
     const fetchCore = useCallback(async () => {
         if (!email) return;
+        const failures = [];
+        const safeGet = (label, url, params, fallback) =>
+            axios.get(url, { params }).catch(err => {
+                const code = err.response?.status || err.code || 'ERR';
+                console.warn(`[Notification] ${label} fetch failed (${code}):`, err.message);
+                failures.push(`${label} (${code})`);
+                return { data: fallback };
+            });
+
         try {
             const [agentsRes, statusRes, ipRes, aiRes, aiSumRes, recRes] = await Promise.all([
-                axios.get(api('api/list_all_devices'), { params: { email } }).catch(() => ({ data: [] })),
-                axios.get(`${backendConfig.dealerURL}/agents/status`, { params: { email } }).catch(() => ({ data: [] })),
-                axios.get(api('api/ip_threats'), { params: { email } }).catch(() => ({ data: { data: [] } })),
-                axios.get(api('api/notify/threats'), { params: { email } }).catch(() => ({ data: null })),
-                axios.get(api('api/ai/threat_summary'), { params: { email } }).catch(() => ({ data: null })),
-                axios.get(api('api/notify/recipients'), { params: { email } }).catch(() => ({ data: null })),
+                safeGet('devices', api('api/list_all_devices'), { email }, []),
+                safeGet('agent_status', `${backendConfig.dealerURL}/agents/status`, { email }, []),
+                safeGet('ip_threats', api('api/ip_threats'), { email }, { data: [] }),
+                safeGet('ai_threats', api('api/notify/threats'), { email }, null),
+                safeGet('ai_summary', api('api/ai/threat_summary'), { email }, null),
+                safeGet('recipients', api('api/notify/recipients'), { email }, null),
             ]);
 
             setAgents(Array.isArray(agentsRes.data) ? agentsRes.data : []);
@@ -89,8 +99,11 @@ function Notification() {
                 setRecipients(recRes.data.recipients || []);
                 if (recRes.data.settings) setSettings(recRes.data.settings);
             }
+
+            setFetchErrors(failures);
         } catch (err) {
             console.error("notification fetch failed", err);
+            setFetchErrors(['unknown error']);
         } finally {
             setLoading(false);
         }
@@ -106,13 +119,30 @@ function Notification() {
 
     const addRecipient = async (e) => {
         e.preventDefault();
-        if (!recipientForm.value.trim()) return;
+        const value = recipientForm.value.trim();
+        if (!value) return;
+
+        // Client-side validation
+        if (recipientForm.type === 'email') {
+            const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!EMAIL_RE.test(value)) {
+                showMsg('err', 'Invalid email format.');
+                return;
+            }
+        } else if (recipientForm.type === 'sms') {
+            const PHONE_RE = /^\+?[1-9]\d{6,14}$/;
+            if (!PHONE_RE.test(value.replace(/[\s-()]/g, ''))) {
+                showMsg('err', 'Phone must be E.164 format (e.g. +15551234567).');
+                return;
+            }
+        }
+
         setActionLoading(true);
         try {
             const res = await axios.post(api('api/notify/recipients'), {
                 type: recipientForm.type,
-                value: recipientForm.value.trim(),
-                label: recipientForm.label.trim() || recipientForm.value.trim(),
+                value,
+                label: recipientForm.label.trim() || value,
             }, { params: { email } });
             setRecipients(prev => [...prev, res.data]);
             setRecipientForm({ type: recipientForm.type, value: '', label: '' });
@@ -231,6 +261,12 @@ function Notification() {
             {actionMsg && (
                 <div className={`mb-6 px-4 py-3 border-4 border-black font-mono font-black uppercase shadow-[4px_4px_0_#000] ${actionMsg.kind === 'ok' ? 'bg-[#CEFFBC] text-black' : 'bg-[#FF6B6B] text-white'}`}>
                     {actionMsg.text}
+                </div>
+            )}
+
+            {fetchErrors.length > 0 && (
+                <div className="mb-6 px-4 py-3 border-4 border-black bg-[#FFECA0] text-black font-mono text-xs sm:text-sm font-bold uppercase shadow-[4px_4px_0_#000] max-w-5xl w-full">
+                    <span className="font-black">⚠ Partial data:</span> {fetchErrors.join(', ')} unavailable. Showing cached values.
                 </div>
             )}
 

@@ -1,8 +1,31 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Send, Bot, User, Loader2, BookOpen, X, ChevronDown, ChevronUp, Wifi, WifiOff, Cpu } from 'lucide-react';
+import { Send, Bot, User, Loader2, BookOpen, X, ChevronDown, ChevronUp, Wifi, WifiOff, Cpu, Copy, Check, Trash2 } from 'lucide-react';
 import { bedrockTools } from './ai_tools';
 import { useAuth } from 'react-oidc-context';
+
+const MAX_INPUT_LEN = 4000;
+
+function CopyButton({ text }) {
+    const [copied, setCopied] = useState(false);
+    const onCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        } catch (_e) { /* clipboard unavailable */ }
+    };
+    return (
+        <button
+            type="button"
+            onClick={onCopy}
+            className="absolute top-1 right-1 bg-[#FFECA0] text-black border-2 border-black px-2 py-1 font-mono font-black text-[10px] uppercase shadow-[2px_2px_0_#000] hover:-translate-y-0.5 hover:shadow-[3px_3px_0_#000] transition-all flex items-center gap-1"
+            title="Copy code"
+        >
+            {copied ? <><Check className="w-3 h-3" /> Copied</> : <><Copy className="w-3 h-3" /> Copy</>}
+        </button>
+    );
+}
 
 const AI_API_URL = import.meta.env.VITE_AI_API_URL || 'http://localhost:8001';
 
@@ -117,15 +140,55 @@ function Ai() {
                     codeLines.push(lines[i]);
                     i++;
                 }
+                const codeText = codeLines.join('\n');
                 elements.push(
                     <div key={`code-${i}`} className="border-4 border-black bg-black text-[#CEFFBC] p-4 my-4 shadow-[4px_4px_0_#000] relative group">
-                        {lang && <div className="absolute top-0 right-0 bg-[#CEFFBC] text-black font-black uppercase text-xs px-2 py-1 border-l-4 border-b-4 border-black">{lang}</div>}
-                        <pre className="overflow-x-auto text-sm font-mono mt-2 pt-2">
-                            <code>{codeLines.join('\n')}</code>
+                        {lang && <div className="absolute top-0 left-0 bg-[#CEFFBC] text-black font-black uppercase text-xs px-2 py-1 border-r-4 border-b-4 border-black">{lang}</div>}
+                        <CopyButton text={codeText} />
+                        <pre className="overflow-x-auto text-sm font-mono mt-6 pt-2">
+                            <code>{codeText}</code>
                         </pre>
                     </div>
                 );
                 i++;
+                continue;
+            }
+
+            // Markdown table: header row | --- | --- | followed by data rows
+            if (line.includes('|') && i + 1 < lines.length && /^\s*\|?[\s\-:|]+\|?\s*$/.test(lines[i + 1])) {
+                flushList();
+                const splitRow = (row) => row.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+                const headers = splitRow(line);
+                i += 2;
+                const rows = [];
+                while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+                    rows.push(splitRow(lines[i]));
+                    i++;
+                }
+                elements.push(
+                    <div key={`tbl-${i}`} className="border-4 border-black overflow-x-auto my-4 shadow-[4px_4px_0_#000]">
+                        <table className="w-full text-sm font-mono text-left">
+                            <thead>
+                                <tr className="bg-black text-[#CEFFBC] uppercase">
+                                    {headers.map((h, hi) => (
+                                        <th key={hi} className="px-3 py-2 border-r-4 border-b-4 border-black font-black"
+                                            dangerouslySetInnerHTML={{ __html: inline(h) }} />
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows.map((r, ri) => (
+                                    <tr key={ri} className={ri % 2 ? 'bg-[#FFECA0]/30' : 'bg-white'}>
+                                        {r.map((c, ci) => (
+                                            <td key={ci} className="px-3 py-2 border-r-2 border-t-2 border-black font-bold"
+                                                dangerouslySetInnerHTML={{ __html: inline(c) }} />
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                );
                 continue;
             }
 
@@ -204,9 +267,29 @@ function Ai() {
         return <div className="space-y-1">{elements}</div>;
     };
 
+    const clearChat = () => {
+        setMessages([]);
+        messagesRef.current = [];
+    };
+
     const handleSend = async (e) => {
         e.preventDefault();
         if (!input.trim() || isLoading) return;
+        if (input.length > MAX_INPUT_LEN) {
+            const trim = [
+                ...messagesRef.current,
+                { role: 'user', content: input.slice(0, 200) + '…' },
+                {
+                    role: 'assistant',
+                    content: `⚠️ **Message too long.** Limit is ${MAX_INPUT_LEN} characters; you sent ${input.length}. Please shorten and retry.`,
+                    isError: true,
+                    ts: Date.now(),
+                }
+            ];
+            messagesRef.current = trim;
+            setMessages(trim);
+            return;
+        }
 
         if (apiStatus === 'offline') {
             const offline = [
@@ -228,11 +311,12 @@ function Ai() {
         setInput('');
 
         const currentMessages = messagesRef.current;
-        const newHistory = [...currentMessages, { role: 'user', content: userMsgContent }];
+        const newHistory = [...currentMessages, { role: 'user', content: userMsgContent, ts: Date.now() }];
         messagesRef.current = newHistory;
         setMessages(newHistory);
 
         setIsLoading(true);
+        const controller = new AbortController();
         try {
             const cleanHistory = currentMessages
                 .filter(m => !m.isError)
@@ -243,7 +327,7 @@ function Ai() {
                 history: cleanHistory,
                 email: cleanHistory.length === 0 ? (email || null) : null,
                 model: selectedModel,
-            }, { timeout: 120000 });
+            }, { timeout: 120000, signal: controller.signal });
 
             const reply = response.data.error
                 ? `⚠️ **Backend Error:** ${response.data.error}`
@@ -251,19 +335,23 @@ function Ai() {
 
             const withReply = [
                 ...messagesRef.current,
-                { role: 'assistant', content: reply, isError: !!response.data.error }
+                { role: 'assistant', content: reply, isError: !!response.data.error, ts: Date.now() }
             ];
             messagesRef.current = withReply;
             setMessages(withReply);
 
         } catch (error) {
             console.error('Chat request failed:', error);
+            const isTimeout = error.code === 'ECONNABORTED' || /timeout/i.test(error.message || '');
             const errMsg = [
                 ...messagesRef.current,
                 {
                     role: 'assistant',
-                    content: `⚠️ **Connection Error:** ${error.message}\n\nMake sure \`api.py\` is running on port 8001 and the Docker MCP container is available.`,
-                    isError: true
+                    content: isTimeout
+                        ? `⚠️ **Request timed out.** The model took too long to respond. Try a faster model (e.g. Nova Lite or Haiku) or simplify your query.`
+                        : `⚠️ **Connection Error:** ${error.message}\n\nMake sure \`api.py\` is running on port 8001 and the Docker MCP container is available.`,
+                    isError: true,
+                    ts: Date.now(),
                 }
             ];
             messagesRef.current = errMsg;
@@ -351,6 +439,18 @@ function Ai() {
                             {bedrockTools.length}
                         </span>
                     </button>
+
+                    {messages.length > 0 && (
+                        <button
+                            onClick={clearChat}
+                            disabled={isLoading}
+                            className="flex items-center gap-1.5 sm:gap-2 font-mono font-black uppercase text-[10px] sm:text-xs px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 border-[3px] sm:border-4 border-black bg-[#FF6B6B] text-white shadow-[3px_3px_0_#000] sm:shadow-[4px_4px_0_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0_#000] transition-all disabled:opacity-50"
+                            title="Clear conversation"
+                        >
+                            <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            <span>Clear</span>
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -437,11 +537,25 @@ function Ai() {
                                     <Bot className="w-10 h-10 md:w-12 md:h-12 text-black" />
                                 </div>
                                 <h3 className="text-3xl md:text-4xl font-black uppercase text-black mb-4">RIHNO AI</h3>
-                                {/* <p className="font-mono font-bold text-gray-800 uppercase leading-relaxed text-xs md:text-sm">
-                                    Powered by <span className="text-black inline-block bg-[#CEFFBC] px-1 border-2 border-black shadow-[2px_2px_0_#000] my-1">AWS Bedrock</span> via the <code className="text-black bg-[#FFECA0] px-1 border-2 border-black shadow-[2px_2px_0_#000]">rihno-mcp-server</code>
-                                    <br /><br />
-                                    Queries run server-side through <code className="text-black bg-[#FF6B6B] text-white px-1 border-2 border-black shadow-[2px_2px_0_#000]">api.py</code> on port 8001.
-                                </p> */}
+                                <p className="font-mono font-bold text-gray-800 leading-relaxed text-xs md:text-sm mb-6">
+                                    Powered by <span className="text-black inline-block bg-[#CEFFBC] px-1 border-2 border-black shadow-[2px_2px_0_#000]">AWS Bedrock</span> + <code className="text-black bg-[#FFECA0] px-1 border-2 border-black shadow-[2px_2px_0_#000]">{bedrockTools.length} MCP tools</code>.
+                                </p>
+                                <div className="w-full text-left grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {[
+                                        'Show me a health summary of all my agents',
+                                        'List active high-severity threats',
+                                        'Plot the threat trend for the last 6 hours',
+                                        'Investigate suspicious connections on sensor-1',
+                                    ].map((q) => (
+                                        <button
+                                            key={q}
+                                            onClick={() => setInput(q)}
+                                            className="text-left font-mono font-bold text-xs md:text-sm uppercase border-4 border-black bg-white px-3 py-2 shadow-[4px_4px_0_#000] hover:-translate-y-1 hover:shadow-[6px_6px_0_#FFECA0] hover:bg-[#FFECA0] transition-all"
+                                        >
+                                            {q}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         )}
 
@@ -466,6 +580,11 @@ function Ai() {
                                         ? <div className="text-lg md:text-xl font-black whitespace-pre-wrap">{msg.content}</div>
                                         : <div className="text-sm md:text-base">{renderMarkdown(msg.content)}</div>
                                     }
+                                    {msg.ts && (
+                                        <div className={`text-[10px] font-mono font-bold uppercase mt-3 pt-2 border-t-2 ${msg.isError ? 'border-white/40 text-white/70' : 'border-black/20 text-black/50'}`}>
+                                            {new Date(msg.ts).toLocaleTimeString()}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -489,14 +608,20 @@ function Ai() {
 
                     <div className="p-4 md:p-6 bg-[#FFECA0] border-t-4 border-black relative z-10">
                         <form onSubmit={handleSend} className="relative flex items-center gap-2 md:gap-4">
-                            <input
-                                type="text"
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                placeholder={apiStatus === 'offline' ? 'SERVER OFFLINE — START API.PY...' : 'QUERY THE COMPUTE...'}
-                                disabled={isLoading}
-                                className="w-full bg-white border-4 border-black py-4 px-4 md:px-6 text-black font-mono font-black text-base md:text-lg shadow-[6px_6px_0_#000] focus:outline-none focus:-translate-y-1 focus:shadow-[8px_8px_0_#000] transition-all disabled:opacity-50 placeholder-black/30"
-                            />
+                            <div className="relative w-full">
+                                <input
+                                    type="text"
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value.slice(0, MAX_INPUT_LEN))}
+                                    placeholder={apiStatus === 'offline' ? 'SERVER OFFLINE — START API.PY...' : 'QUERY THE COMPUTE...'}
+                                    disabled={isLoading}
+                                    maxLength={MAX_INPUT_LEN}
+                                    className="w-full bg-white border-4 border-black py-4 px-4 md:px-6 pr-20 text-black font-mono font-black text-base md:text-lg shadow-[6px_6px_0_#000] focus:outline-none focus:-translate-y-1 focus:shadow-[8px_8px_0_#000] transition-all disabled:opacity-50 placeholder-black/30"
+                                />
+                                <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono font-black uppercase ${input.length > MAX_INPUT_LEN * 0.9 ? 'text-[#FF6B6B]' : 'text-black/40'}`}>
+                                    {input.length}/{MAX_INPUT_LEN}
+                                </span>
+                            </div>
                             <button
                                 type="submit"
                                 disabled={!input.trim() || isLoading}

@@ -17,7 +17,9 @@ Usage:
 """
 
 import json
+import logging
 import pickle
+import time
 from typing import Dict, List
 
 from feature_extractor import (
@@ -30,6 +32,8 @@ from autoencoder_detector import AutoencoderDetector
 from network_analyzer import NetworkAnalyzer
 from ensemble_scorer import EnsembleScorer
 from redis_store import RedisStore, MODEL_SAVE_INTERVAL
+
+logger = logging.getLogger(__name__)
 
 
 # ── Per-Agent Pipeline ───────────────────────────────────────────────────────
@@ -50,9 +54,13 @@ class AgentPipeline:
         self.statistical = StatisticalDetector(z_threshold=3.0)
         self.iforest = IsolationForestDetector(contamination=0.05)
         self.autoencoder = AutoencoderDetector(input_dim=n_features, latent_dim=16)
+        # Tag detectors so training/restore logs identify the agent
+        self.iforest.agent_label = self.agent_key
+        self.autoencoder.agent_label = self.agent_key
         self.network = NetworkAnalyzer()
         self.ensemble = EnsembleScorer()
         self.sample_count = 0
+        self.last_saved_at: float = 0.0
 
     def process(self, features, net_features, metadata) -> Dict:
         """Run all detection layers and return ensemble result."""
@@ -91,6 +99,12 @@ class AgentPipeline:
             store.save_model_state(e, a, "iforest", self.iforest.serialize())
         if self.autoencoder.training_data:
             store.save_model_state(e, a, "autoencoder", self.autoencoder.serialize())
+        self.last_saved_at = time.time()
+        logger.info(
+            "[pipeline][%s] persisted to redis (samples=%d iforest_trained=%s ae_trained=%s)",
+            self.agent_key, self.sample_count,
+            self.iforest.is_trained, self.autoencoder.is_trained,
+        )
 
     def load_from_redis(self, store: RedisStore):
         """Restore model state from Redis."""

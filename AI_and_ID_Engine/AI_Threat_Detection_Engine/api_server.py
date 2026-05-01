@@ -13,6 +13,7 @@ Env vars:
     REDIS_PASS  (default: empty)
 """
 
+import logging
 import os
 import threading
 from typing import Dict, List, Any, Optional
@@ -22,7 +23,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from redis_store import RedisStore
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+)
+
+from redis_store import RedisStore, MODEL_SAVE_INTERVAL
 from main import IDSEngine
 from auto_detector import AutoDetector
 
@@ -234,6 +240,83 @@ async def save_models():
     with engine_lock:
         engine.save_all()
     return {"status": "saved", "pipelines": len(engine._pipelines)}
+
+
+@app.get("/models/status")
+async def models_status():
+    """
+    Per-agent model freshness report. Use this to verify that detectors
+    are actually retraining over time and that Redis persistence is working.
+
+    Returned per pipeline:
+      sample_count, last_saved_at, iforest {trained, train_count, last_trained_at, age_seconds, buffer_size},
+      autoencoder {trained, train_count, last_trained_at, age_seconds, buffer_size, threshold},
+      statistical {samples}
+    """
+    now = datetime.utcnow().timestamp()
+    rows = []
+    with engine_lock:
+        for key, pipeline in engine._pipelines.items():
+            ifd = pipeline.iforest
+            ae = pipeline.autoencoder
+            rows.append({
+                "agent_key": key,
+                "sample_count": pipeline.sample_count,
+                "last_saved_at": pipeline.last_saved_at,
+                "last_saved_age_seconds": (now - pipeline.last_saved_at) if pipeline.last_saved_at else None,
+                "iforest": {
+                    "trained": ifd.is_trained,
+                    "train_count": ifd.train_count,
+                    "last_trained_at": ifd.last_trained_at,
+                    "age_seconds": (now - ifd.last_trained_at) if ifd.last_trained_at else None,
+                    "buffer_size": len(ifd.training_data),
+                    "samples_since_train": ifd.samples_since_train,
+                    "min_samples": ifd.MIN_SAMPLES,
+                    "retrain_interval": ifd.RETRAIN_INTERVAL,
+                },
+                "autoencoder": {
+                    "trained": ae.is_trained,
+                    "train_count": ae.train_count,
+                    "last_trained_at": ae.last_trained_at,
+                    "age_seconds": (now - ae.last_trained_at) if ae.last_trained_at else None,
+                    "buffer_size": len(ae.training_data),
+                    "samples_since_train": ae.samples_since_train,
+                    "threshold": ae.threshold,
+                    "min_samples": ae.MIN_SAMPLES,
+                    "retrain_interval": ae.RETRAIN_INTERVAL,
+                },
+                "statistical": {
+                    "samples": pipeline.statistical.normalizer.n,
+                },
+            })
+    return {
+        "now": now,
+        "active_pipelines": len(rows),
+        "save_interval": MODEL_SAVE_INTERVAL,
+        "pipelines": rows,
+    }
+
+
+@app.post("/models/retrain/{email}/{agent_name}")
+async def force_retrain(email: str, agent_name: str):
+    """Force an immediate retrain of an agent's iforest + autoencoder."""
+    if not store.agent_exists(email, agent_name):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    with engine_lock:
+        pipeline = engine._get_pipeline(email, agent_name)
+        ifd, ae = pipeline.iforest, pipeline.autoencoder
+        if len(ifd.training_data) >= ifd.MIN_SAMPLES:
+            ifd.train()
+        if len(ae.training_data) >= ae.MIN_SAMPLES:
+            ae.train()
+        pipeline.save_to_redis(store)
+    return {
+        "status": "retrained",
+        "iforest_trained": ifd.is_trained,
+        "iforest_train_count": ifd.train_count,
+        "autoencoder_trained": ae.is_trained,
+        "autoencoder_train_count": ae.train_count,
+    }
 
 
 # ── Auto-detector ────────────────────────────────────────────────────────────

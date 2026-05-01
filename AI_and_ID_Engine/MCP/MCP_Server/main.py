@@ -440,6 +440,286 @@ def get_network_map(email: str, agent_name: str) -> str:
 
 
 # ============================================================
+# Tool 11 – get_top_talkers
+# ============================================================
+@mcp.tool()
+def get_top_talkers(email: str, agent_name: str, hours: int = 1, limit: int = 10) -> str:
+    """
+    Identify the top remote IPs an agent talked to over a recent window,
+    ranked by connection count. Useful for spotting unusual peers,
+    beaconing destinations, or potential C2 infrastructure.
+
+    Parameters
+    ----------
+    email      : Owner email of the agent.
+    agent_name : Name of the agent to analyse.
+    hours      : Lookback window in hours (default 1, max 24).
+    limit      : Max remote IPs to return (default 10, max 50).
+
+    Returns per remote IP: connection_count, distinct_ports, suspicious_count,
+    last_seen, primary_protocol, primary_process_name.
+    """
+    hours = min(int(hours), 24)
+    limit = min(int(limit), 50)
+    sql = """
+        SELECT remote_ip,
+               COUNT(*)                          AS connection_count,
+               COUNT(DISTINCT remote_port)       AS distinct_ports,
+               SUM(CASE WHEN is_suspicious THEN 1 ELSE 0 END) AS suspicious_count,
+               MAX(time)                         AS last_seen,
+               MODE() WITHIN GROUP (ORDER BY protocol)     AS primary_protocol,
+               MODE() WITHIN GROUP (ORDER BY process_name) AS primary_process_name
+        FROM rihno_connections c
+        JOIN rihno_agents a ON a.agent_id = c.agent_id
+        WHERE a.email = %s
+          AND c.agent_name = %s
+          AND c.time >= NOW() - (%s || ' hours')::INTERVAL
+        GROUP BY remote_ip
+        ORDER BY connection_count DESC
+        LIMIT %s;
+    """
+    try:
+        rows = _query(sql, (email, agent_name, str(hours), limit))
+        return _ok(rows) if rows else _ok({"message": f"No connections found for '{agent_name}' in last {hours}h."})
+    except psycopg2.Error as e:
+        return _err(e)
+
+
+# ============================================================
+# Tool 12 – get_threat_trend
+# ============================================================
+@mcp.tool()
+def get_threat_trend(email: str, agent_name: str = "", hours: int = 6) -> str:
+    """
+    Aggregate threat scores per hour to show whether risk is climbing,
+    falling, or steady. Use this for executive briefings or to confirm
+    a remediation has reduced anomaly rates.
+
+    Parameters
+    ----------
+    email      : Owner email.
+    agent_name : Optional. Scope to a single agent; blank = all agents.
+    hours      : Lookback window in hours (default 6, max 168 = 7 days).
+
+    Returns per hour bucket: avg_port_scan_score, avg_exfil_score,
+    avg_c2_score, max_combined_score, total_suspicious_processes.
+    """
+    hours = min(int(hours), 168)
+    conditions = ["email = %s", "bucket >= NOW() - (%s || ' hours')::INTERVAL"]
+    params: list = [email, str(hours)]
+    if agent_name:
+        conditions.append("agent_name = %s")
+        params.append(agent_name)
+    where = " AND ".join(conditions)
+    sql = f"""
+        SELECT date_trunc('hour', bucket) AS hour,
+               AVG(max_port_scan_score)        AS avg_port_scan_score,
+               AVG(max_exfil_score)            AS avg_exfil_score,
+               AVG(max_c2_score)               AS avg_c2_score,
+               GREATEST(MAX(max_port_scan_score), MAX(max_exfil_score), MAX(max_c2_score)) AS max_combined_score,
+               SUM(total_suspicious_processes) AS total_suspicious_processes
+        FROM rihno_metrics_1min
+        WHERE {where}
+        GROUP BY hour
+        ORDER BY hour ASC;
+    """
+    try:
+        rows = _query(sql, tuple(params))
+        return _ok(rows) if rows else _ok({"message": "No threat trend data found in window."})
+    except psycopg2.Error as e:
+        return _err(e)
+
+
+# ============================================================
+# Tool 13 – get_agent_health_summary
+# ============================================================
+@mcp.tool()
+def get_agent_health_summary(email: str) -> str:
+    """
+    Single-call dashboard: per-agent rollup of system health, threat posture,
+    and unresolved alert counts. Best for "what's happening across all my
+    agents right now?" type questions.
+
+    Parameters
+    ----------
+    email : Owner email.
+
+    Returns per agent: agent_name, last_seen, is_active, latest_cpu, latest_memory,
+    latest_connections, latest_threat_score (max of port/exfil/c2 scores),
+    unresolved_alerts, critical_alerts, suspicious_connections_24h.
+    """
+    sql = """
+        WITH latest AS (
+            SELECT m.*,
+                   ROW_NUMBER() OVER (PARTITION BY agent_name ORDER BY time DESC) rn
+            FROM rihno_metrics m
+            WHERE email = %s
+        ),
+        agents AS (
+            SELECT agent_id, agent_name, last_seen, is_active
+            FROM rihno_agents WHERE email = %s
+        )
+        SELECT a.agent_name, a.last_seen, a.is_active,
+               l.cpu_usage_percent       AS latest_cpu,
+               l.memory_usage_percent    AS latest_memory,
+               l.connection_count        AS latest_connections,
+               GREATEST(COALESCE(l.port_scanning_score,0),
+                        COALESCE(l.data_exfiltration_score,0),
+                        COALESCE(l.c2_communication_score,0)) AS latest_threat_score,
+               (SELECT COUNT(*) FROM rihno_alerts al
+                  WHERE al.agent_name = a.agent_name AND al.email = %s
+                    AND al.resolved = FALSE) AS unresolved_alerts,
+               (SELECT COUNT(*) FROM rihno_alerts al
+                  WHERE al.agent_name = a.agent_name AND al.email = %s
+                    AND al.severity = 'critical' AND al.resolved = FALSE) AS critical_alerts,
+               (SELECT COUNT(*) FROM rihno_connections c
+                  WHERE c.agent_name = a.agent_name
+                    AND c.is_suspicious = TRUE
+                    AND c.time >= NOW() - INTERVAL '24 hours') AS suspicious_connections_24h
+        FROM agents a
+        LEFT JOIN latest l ON l.agent_name = a.agent_name AND l.rn = 1
+        ORDER BY latest_threat_score DESC NULLS LAST, a.agent_name;
+    """
+    try:
+        rows = _query(sql, (email, email, email, email))
+        return _ok(rows) if rows else _ok({"message": f"No agents registered for: {email}"})
+    except psycopg2.Error as e:
+        return _err(e)
+
+
+# ============================================================
+# Tool 14 – get_alert_correlation
+# ============================================================
+@mcp.tool()
+def get_alert_correlation(email: str, hours: int = 24, limit: int = 50) -> str:
+    """
+    Find alert clusters: groups of alerts that fire close together in time
+    and may indicate a coordinated attack across multiple agents or types.
+    Bucket size is 5 minutes.
+
+    Parameters
+    ----------
+    email : Owner email.
+    hours : Lookback window in hours (default 24, max 168).
+    limit : Max correlation buckets to return (default 50, max 200).
+
+    Returns per 5-min bucket: bucket_time, alert_count, distinct_agents,
+    distinct_severities, severities_list, agents_list.
+    """
+    hours = min(int(hours), 168)
+    limit = min(int(limit), 200)
+    sql = """
+        SELECT date_trunc('minute', time) - (EXTRACT(MINUTE FROM time)::int %% 5) * INTERVAL '1 minute' AS bucket_time,
+               COUNT(*)                              AS alert_count,
+               COUNT(DISTINCT agent_name)            AS distinct_agents,
+               COUNT(DISTINCT severity)              AS distinct_severities,
+               ARRAY_AGG(DISTINCT severity)          AS severities_list,
+               ARRAY_AGG(DISTINCT agent_name)        AS agents_list
+        FROM rihno_alerts
+        WHERE email = %s
+          AND time >= NOW() - (%s || ' hours')::INTERVAL
+        GROUP BY bucket_time
+        HAVING COUNT(*) > 1
+        ORDER BY alert_count DESC, bucket_time DESC
+        LIMIT %s;
+    """
+    try:
+        rows = _query(sql, (email, str(hours), limit))
+        return _ok(rows) if rows else _ok({"message": "No correlated alert clusters found."})
+    except psycopg2.Error as e:
+        return _err(e)
+
+
+# ============================================================
+# Tool 15 – get_active_threats
+# ============================================================
+@mcp.tool()
+def get_active_threats(email: str, min_severity: str = "high") -> str:
+    """
+    One-shot summary of every currently-active (unresolved) high or critical
+    severity alert across an email's agents. Use to triage what to investigate
+    first.
+
+    Parameters
+    ----------
+    email        : Owner email.
+    min_severity : 'medium', 'high', or 'critical' — default 'high'.
+
+    Returns per agent grouping: agent_name, total_active, by_severity (counts),
+    most_recent_alert, oldest_unresolved_alert.
+    """
+    rank_map = {"medium": ["medium", "high", "critical"], "high": ["high", "critical"], "critical": ["critical"]}
+    sevs = rank_map.get(min_severity.lower(), ["high", "critical"])
+    sql = """
+        SELECT agent_name,
+               COUNT(*)                                   AS total_active,
+               SUM(CASE WHEN severity='critical' THEN 1 ELSE 0 END) AS critical_count,
+               SUM(CASE WHEN severity='high'     THEN 1 ELSE 0 END) AS high_count,
+               SUM(CASE WHEN severity='medium'   THEN 1 ELSE 0 END) AS medium_count,
+               MAX(time)                                  AS most_recent_alert,
+               MIN(time)                                  AS oldest_unresolved_alert
+        FROM rihno_alerts
+        WHERE email = %s
+          AND resolved = FALSE
+          AND severity = ANY(%s)
+        GROUP BY agent_name
+        ORDER BY critical_count DESC, high_count DESC, total_active DESC;
+    """
+    try:
+        rows = _query(sql, (email, sevs))
+        return _ok(rows) if rows else _ok({"message": f"No active {min_severity}+ threats for {email}."})
+    except psycopg2.Error as e:
+        return _err(e)
+
+
+# ============================================================
+# Tool 16 – get_port_scan_report
+# ============================================================
+@mcp.tool()
+def get_port_scan_report(email: str, agent_name: str, hours: int = 1) -> str:
+    """
+    Forensic report on possible port-scanning activity by or against an agent:
+    distinct remote ports contacted per remote IP, time of first/last contact,
+    and protocol distribution. Helps confirm whether a high port_scanning_score
+    is real reconnaissance or false-positive.
+
+    Parameters
+    ----------
+    email      : Owner email.
+    agent_name : Agent to investigate.
+    hours      : Lookback window in hours (default 1, max 24).
+
+    Returns per remote IP: distinct_ports_touched, ports_sample (first 20),
+    first_contact, last_contact, total_attempts, tcp_count, udp_count.
+    """
+    hours = min(int(hours), 24)
+    sql = """
+        SELECT remote_ip,
+               COUNT(DISTINCT remote_port)               AS distinct_ports_touched,
+               (ARRAY_AGG(DISTINCT remote_port))[1:20]   AS ports_sample,
+               MIN(time)                                 AS first_contact,
+               MAX(time)                                 AS last_contact,
+               COUNT(*)                                  AS total_attempts,
+               SUM(CASE WHEN protocol='tcp' THEN 1 ELSE 0 END) AS tcp_count,
+               SUM(CASE WHEN protocol='udp' THEN 1 ELSE 0 END) AS udp_count
+        FROM rihno_connections c
+        JOIN rihno_agents a ON a.agent_id = c.agent_id
+        WHERE a.email = %s
+          AND c.agent_name = %s
+          AND c.time >= NOW() - (%s || ' hours')::INTERVAL
+        GROUP BY remote_ip
+        HAVING COUNT(DISTINCT remote_port) >= 3
+        ORDER BY distinct_ports_touched DESC
+        LIMIT 50;
+    """
+    try:
+        rows = _query(sql, (email, agent_name, str(hours)))
+        return _ok(rows) if rows else _ok({"message": f"No port-scan-like patterns found for '{agent_name}' in last {hours}h."})
+    except psycopg2.Error as e:
+        return _err(e)
+
+
+# ============================================================
 # Entrypoint
 # ============================================================
 if __name__ == "__main__":
