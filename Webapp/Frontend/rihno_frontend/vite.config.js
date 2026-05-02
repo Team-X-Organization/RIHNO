@@ -31,4 +31,24 @@ const credentialsMiddleware = () => ({
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), credentialsMiddleware()],
+  optimizeDeps: {
+    exclude: [
+      '@aws-sdk/client-bedrock-runtime',
+      '@aws-sdk/credential-providers',
+    ],
+  },
+  build: {
+    // skip esbuild minifier — crashes in Docker with <2GB RAM
+    minify: false,
+    rollupOptions: {
+      // externalize react + 3D stack so Rollup skips parsing ~200MB of source
+      // (drei transitively pulls three-stdlib/stats-gl/hls.js/mediapipe)
+      // all resolved at runtime via importmap in index.html
+      external: (id) => {
+        const pkgs = ['react', 'react-dom', 'three', '@react-three/fiber', '@react-three/drei'];
+        return pkgs.some(p => id === p || id.startsWith(p + '/'));
+      },
+      maxParallelFileOps: 3,
+    },
+  },
 })

@@ -66,6 +66,7 @@ docker build -t rihno_ai_engine .
 docker run -d --name my_rihno_ai_engine -p 4050:4050 \
   -e REDIS_HOST=my_rihno_redis \
   -e REDIS_PORT=6379 \
+  -e AUTO_DETECT_INTERVAL=5.0 \
   --network rihno-network rihno_ai_engine
 
 # Notification Engine (email + SMS)
@@ -114,7 +115,7 @@ docker run -d --name my_rihno_backend -p 5050:5050 \
   -e THREAT_API_URL=http://my_rihno_ip_threat:8888/api/scans \
   --network rihno-network rihno_backend
 
-# Frontend (Vite dev server, port 5173)
+# Frontend (production build served via Vite preview, port 5173)
 cd Webapp/Frontend/rihno_frontend
 docker build -t rihno_frontend .
 docker run -d --name my_rihno_frontend -p 5173:5173 \
@@ -158,8 +159,11 @@ THREAT_API_URL=http://my_rihno_ip_threat:8888/api/scans
 | http://localhost:5050/api/ai/status     | Backend → AI engine |
 | http://localhost:5050/api/notify/threats?email=you@x.com | Backend → Notify engine |
 | http://localhost:4050/health            | AI engine direct |
+| http://localhost:4050/status            | Global engine status (all agents) |
+| http://localhost:4050/agents            | List all registered agents |
 | http://localhost:4050/models/status     | Hybrid model freshness (buffer size, threshold, RL ε) |
 | http://localhost:4050/auto_detector/status | Auto-detector thread health |
+| http://localhost:4050/threat_summary?email=you@x.com | Per-user aggregated threat data for frontend |
 | http://localhost:5060/health            | Notify engine direct |
 | http://localhost:8888/api/scans         | IP threat engine direct |
 

@@ -27,8 +27,7 @@ from feature_extractor import (
     extract_metadata, make_agent_key, ALL_FEATURES,
 )
 from statistical_detector import StatisticalDetector
-from isolation_forest_detector import IsolationForestDetector
-from autoencoder_detector import AutoencoderDetector
+from hybrid_detector import HybridDetector
 from network_analyzer import NetworkAnalyzer
 from ensemble_scorer import EnsembleScorer
 from redis_store import RedisStore, MODEL_SAVE_INTERVAL
@@ -41,8 +40,7 @@ logger = logging.getLogger(__name__)
 class AgentPipeline:
     """
     Isolated detection pipeline for a single agent.
-    Each agent has its own normalizer, isolation forest,
-    autoencoder, and network analyzer.
+    Each agent has its own normalizer, hybrid detector, and network analyzer.
     """
 
     def __init__(self, email: str, agent_name: str):
@@ -52,11 +50,8 @@ class AgentPipeline:
 
         n_features = len(ALL_FEATURES)
         self.statistical = StatisticalDetector(z_threshold=3.0)
-        self.iforest = IsolationForestDetector(contamination=0.05)
-        self.autoencoder = AutoencoderDetector(input_dim=n_features, latent_dim=16)
-        # Tag detectors so training/restore logs identify the agent
-        self.iforest.agent_label = self.agent_key
-        self.autoencoder.agent_label = self.agent_key
+        self.hybrid = HybridDetector(input_dim=n_features)
+        self.hybrid.agent_label = self.agent_key
         self.network = NetworkAnalyzer()
         self.ensemble = EnsembleScorer()
         self.sample_count = 0
@@ -67,26 +62,21 @@ class AgentPipeline:
         self.sample_count += 1
 
         self.statistical.update(features)
-        self.iforest.add_sample(features)
-        self.autoencoder.add_sample(features)
+        self.hybrid.add_sample(features)
 
         stat_result = self.statistical.detect(features)
-        iforest_result = self.iforest.detect(features)
-        ae_result = self.autoencoder.detect(features)
+        hybrid_result = self.hybrid.detect(features)
         net_result = self.network.analyze(net_features)
 
-        result = self.ensemble.score(
-            stat_result, iforest_result, ae_result, net_result, metadata,
-        )
+        result = self.ensemble.score(stat_result, hybrid_result, net_result, metadata)
 
         result["system_status"] = {
             "agent_key": self.agent_key,
             "total_samples": self.sample_count,
             "statistical_active": True,
-            "iforest_active": self.iforest.is_active,
-            "iforest_samples_needed": max(0, self.iforest.MIN_SAMPLES - len(self.iforest.training_data)),
-            "autoencoder_active": self.autoencoder.is_active,
-            "autoencoder_samples_needed": max(0, self.autoencoder.MIN_SAMPLES - len(self.autoencoder.training_data)),
+            "hybrid_active": self.hybrid.is_active,
+            "hybrid_samples_needed": max(0, self.hybrid.MIN_SAMPLES - len(self.hybrid.training_data)),
+            "hybrid_train_count": self.hybrid.train_count,
         }
         return result
 
@@ -95,15 +85,12 @@ class AgentPipeline:
         e, a = self.email, self.agent_name
         norm = self.statistical.normalizer
         store.save_normalizer(e, a, norm.n, norm.mean, norm.M2, norm.min_vals, norm.max_vals)
-        if self.iforest.training_data:
-            store.save_model_state(e, a, "iforest", self.iforest.serialize())
-        if self.autoencoder.training_data:
-            store.save_model_state(e, a, "autoencoder", self.autoencoder.serialize())
+        if self.hybrid.training_data:
+            store.save_model_state(e, a, "hybrid", self.hybrid.serialize())
         self.last_saved_at = time.time()
         logger.info(
-            "[pipeline][%s] persisted to redis (samples=%d iforest_trained=%s ae_trained=%s)",
-            self.agent_key, self.sample_count,
-            self.iforest.is_trained, self.autoencoder.is_trained,
+            "[pipeline][%s] persisted to redis (samples=%d hybrid_trained=%s)",
+            self.agent_key, self.sample_count, self.hybrid.is_trained,
         )
 
     def load_from_redis(self, store: RedisStore):
@@ -118,12 +105,9 @@ class AgentPipeline:
             n.min_vals = norm_data["min_vals"]
             n.max_vals = norm_data["max_vals"]
             self.sample_count = n.n
-        iforest_data = store.load_model_state(e, a, "iforest")
-        if iforest_data:
-            self.iforest.deserialize(iforest_data)
-        ae_data = store.load_model_state(e, a, "autoencoder")
-        if ae_data:
-            self.autoencoder.deserialize(ae_data)
+        hybrid_data = store.load_model_state(e, a, "hybrid")
+        if hybrid_data:
+            self.hybrid.deserialize(hybrid_data)
 
 
 # ── Multi-Agent Engine ───────────────────────────────────────────────────────
@@ -213,6 +197,7 @@ class IDSEngine:
     def get_agent_status(self, email: str, agent_name: str) -> Dict:
         pipeline = self._get_pipeline(email, agent_name)
         summary = self.store.get_agent_summary(email, agent_name)
+        h = pipeline.hybrid
         return {
             "agent_key": pipeline.agent_key,
             "email": email,
@@ -220,15 +205,14 @@ class IDSEngine:
             "samples_processed": pipeline.sample_count,
             "layers": {
                 "statistical": {"active": True},
-                "isolation_forest": {
-                    "active": pipeline.iforest.is_active,
-                    "samples": len(pipeline.iforest.training_data),
-                    "needed": pipeline.iforest.MIN_SAMPLES,
-                },
-                "autoencoder": {
-                    "active": pipeline.autoencoder.is_active,
-                    "samples": len(pipeline.autoencoder.training_data),
-                    "needed": pipeline.autoencoder.MIN_SAMPLES,
+                "hybrid": {
+                    "active": h.is_active,
+                    "samples": len(h.training_data),
+                    "needed": h.MIN_SAMPLES,
+                    "train_count": h.train_count,
+                    "threshold": round(h.threshold, 6),
+                    "threshold_multiplier": round(h._threshold_multiplier, 4),
+                    "rl_epsilon": round(h.rl_epsilon, 4),
                 },
                 "network_analyzer": {"active": True},
             },

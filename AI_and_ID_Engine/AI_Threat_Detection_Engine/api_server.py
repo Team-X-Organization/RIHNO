@@ -245,45 +245,36 @@ async def save_models():
 @app.get("/models/status")
 async def models_status():
     """
-    Per-agent model freshness report. Use this to verify that detectors
-    are actually retraining over time and that Redis persistence is working.
+    Per-agent model freshness report. Verifies detectors retrain and Redis persistence works.
 
     Returned per pipeline:
-      sample_count, last_saved_at, iforest {trained, train_count, last_trained_at, age_seconds, buffer_size},
-      autoencoder {trained, train_count, last_trained_at, age_seconds, buffer_size, threshold},
+      sample_count, last_saved_at,
+      hybrid {trained, train_count, last_trained_at, age_seconds, buffer_size,
+              threshold, threshold_multiplier, rl_epsilon},
       statistical {samples}
     """
     now = datetime.utcnow().timestamp()
     rows = []
     with engine_lock:
         for key, pipeline in engine._pipelines.items():
-            ifd = pipeline.iforest
-            ae = pipeline.autoencoder
+            h = pipeline.hybrid
             rows.append({
                 "agent_key": key,
                 "sample_count": pipeline.sample_count,
                 "last_saved_at": pipeline.last_saved_at,
                 "last_saved_age_seconds": (now - pipeline.last_saved_at) if pipeline.last_saved_at else None,
-                "iforest": {
-                    "trained": ifd.is_trained,
-                    "train_count": ifd.train_count,
-                    "last_trained_at": ifd.last_trained_at,
-                    "age_seconds": (now - ifd.last_trained_at) if ifd.last_trained_at else None,
-                    "buffer_size": len(ifd.training_data),
-                    "samples_since_train": ifd.samples_since_train,
-                    "min_samples": ifd.MIN_SAMPLES,
-                    "retrain_interval": ifd.RETRAIN_INTERVAL,
-                },
-                "autoencoder": {
-                    "trained": ae.is_trained,
-                    "train_count": ae.train_count,
-                    "last_trained_at": ae.last_trained_at,
-                    "age_seconds": (now - ae.last_trained_at) if ae.last_trained_at else None,
-                    "buffer_size": len(ae.training_data),
-                    "samples_since_train": ae.samples_since_train,
-                    "threshold": ae.threshold,
-                    "min_samples": ae.MIN_SAMPLES,
-                    "retrain_interval": ae.RETRAIN_INTERVAL,
+                "hybrid": {
+                    "trained": h.is_trained,
+                    "train_count": h.train_count,
+                    "last_trained_at": h.last_trained_at,
+                    "age_seconds": (now - h.last_trained_at) if h.last_trained_at else None,
+                    "buffer_size": len(h.training_data),
+                    "samples_since_train": h.samples_since_train,
+                    "threshold": h.threshold,
+                    "threshold_multiplier": h._threshold_multiplier,
+                    "rl_epsilon": h.rl_epsilon,
+                    "min_samples": h.MIN_SAMPLES,
+                    "retrain_interval": h.RETRAIN_INTERVAL,
                 },
                 "statistical": {
                     "samples": pipeline.statistical.normalizer.n,
@@ -299,23 +290,21 @@ async def models_status():
 
 @app.post("/models/retrain/{email}/{agent_name}")
 async def force_retrain(email: str, agent_name: str):
-    """Force an immediate retrain of an agent's iforest + autoencoder."""
+    """Force an immediate retrain of the agent's hybrid detector."""
     if not store.agent_exists(email, agent_name):
         raise HTTPException(status_code=404, detail="Agent not found")
     with engine_lock:
         pipeline = engine._get_pipeline(email, agent_name)
-        ifd, ae = pipeline.iforest, pipeline.autoencoder
-        if len(ifd.training_data) >= ifd.MIN_SAMPLES:
-            ifd.train()
-        if len(ae.training_data) >= ae.MIN_SAMPLES:
-            ae.train()
+        h = pipeline.hybrid
+        if len(h.training_data) >= h.MIN_SAMPLES:
+            h.train()
         pipeline.save_to_redis(store)
     return {
         "status": "retrained",
-        "iforest_trained": ifd.is_trained,
-        "iforest_train_count": ifd.train_count,
-        "autoencoder_trained": ae.is_trained,
-        "autoencoder_train_count": ae.train_count,
+        "hybrid_trained": h.is_trained,
+        "hybrid_train_count": h.train_count,
+        "hybrid_threshold": h.threshold,
+        "hybrid_buffer_size": len(h.training_data),
     }
 
 

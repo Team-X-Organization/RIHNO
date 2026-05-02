@@ -8,8 +8,7 @@ Key Schema (must match Go dealer's redis_pipeline.go):
   ids:{email}:{agent}:stream          STREAM — raw metrics (Go writes, Python reads)
   ids:{email}:{agent}:latest          STRING — latest metric JSON snapshot
   ids:{email}:{agent}:alerts          ZSET   — alerts scored by timestamp
-  ids:{email}:{agent}:model:iforest   STRING — pickled isolation forest state
-  ids:{email}:{agent}:model:autoencoder STRING — pickled autoencoder state
+  ids:{email}:{agent}:model:hybrid    STRING — pickled hybrid AE+GAN+RL state
   ids:{email}:{agent}:model:normalizer STRING — pickled normalizer state
   ids:{email}:{agent}:config          HASH   — per-agent config overrides
   ids:global:stats                    HASH   — global counters
@@ -211,8 +210,7 @@ class RedisStore:
             "agent_id": agent_id,
             "stream_length": self.get_stream_length(email, agent),
             "recent_alerts": len(self.get_recent_alerts(email, agent, count=10)),
-            "has_iforest": self.load_model_state(email, agent, "iforest") is not None,
-            "has_autoencoder": self.load_model_state(email, agent, "autoencoder") is not None,
+            "has_hybrid": self.load_model_state(email, agent, "hybrid") is not None,
             "has_normalizer": self.load_model_state(email, agent, "normalizer") is not None,
         }
 
@@ -225,7 +223,7 @@ class RedisStore:
             for s in ["stream", "latest", "alerts", "config", "last_assessment"]
         ] + [
             self._key(agent_id, "model", c)
-            for c in ["iforest", "autoencoder", "normalizer"]
+            for c in ["hybrid", "normalizer", "iforest", "autoencoder"]  # include legacy keys
         ]
         self.redis.delete(*keys)
         self.redis.srem(self._key("agents"), agent_id)

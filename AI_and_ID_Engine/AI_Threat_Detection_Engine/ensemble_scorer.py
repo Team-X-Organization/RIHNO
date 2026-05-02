@@ -27,25 +27,22 @@ class EnsembleScorer:
     """Combine multiple detector outputs into a single anomaly score."""
 
     BASE_WEIGHTS = {
-        "statistical": 0.30,
-        "isolation_forest": 0.25,
-        "autoencoder": 0.25,
+        "statistical": 0.35,
+        "hybrid": 0.45,
         "network_analyzer": 0.20,
     }
 
     def score(
         self,
         statistical_result: Dict,
-        iforest_result: Dict,
-        autoencoder_result: Dict,
+        hybrid_result: Dict,
         network_result: Dict,
         metadata: Dict,
     ) -> Dict:
         """Compute ensemble anomaly score with adaptive weighting."""
         layers = {
             "statistical": statistical_result,
-            "isolation_forest": iforest_result,
-            "autoencoder": autoencoder_result,
+            "hybrid": hybrid_result,
             "network_analyzer": network_result,
         }
 
@@ -94,4 +91,10 @@ class EnsembleScorer:
             "network_alerts": network_result.get("alerts", []),
             "network_patterns": network_result.get("patterns", []),
             "anomalous_features": statistical_result.get("anomalous_features", [])[:10],
+            "hybrid_details": {
+                "reconstruction_error": hybrid_result.get("reconstruction_error", 0.0),
+                "discriminator_score": hybrid_result.get("discriminator_score", 0.0),
+                "threshold_multiplier": hybrid_result.get("threshold_multiplier", 1.0),
+                "rl_epsilon": hybrid_result.get("rl_epsilon", 0.5),
+            },
         }

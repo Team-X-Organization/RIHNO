@@ -56,12 +56,18 @@ independently. </p>
 
 <p>AI Detection Pipeline: The Kafka stream is consumed by Python-based consumers (via
 TCP port 9092) that perform real-time feature engineering, normalization, and scaling using
-Pandas and Scikit-learn. The processed data is fed into the AI Decision Engine, which
-employs both Supervised and Unsupervised machine learning models built with Scikit-learn
-and PyTorch, operating on a Python 3 runtime. A Rule-Based Decision Engine complements
-the ML models to enhance detection accuracy. When the AI Decision Engine determines that an
-intrusion is present (“If Intrusion” check), the Intrusion Alert Engine is triggered, generating
-notifications and persisting alert records. </p>
+Pandas and Scikit-learn. The processed data is fed into the AI Decision Engine, which runs
+three parallel detection layers per agent: (1) a Statistical layer using online z-score
+normalisation active from the first sample; (2) a Hybrid AE+GAN+RL layer built with PyTorch —
+an Autoencoder learns to reconstruct normal traffic, a GAN Discriminator adversarially
+sharpens its latent representation, and a DQN Q-network dynamically adapts the detection
+threshold at runtime (activates after 200 per-agent samples, retrains every 50 new samples);
+(3) a Network Analyzer applying rule-based graph-traffic checks from the first sample.
+Ensemble weights combine the three layers (Statistical 35%, Hybrid 45%, Network 20%) into a
+single threat score mapped to levels: normal / low / medium / high / critical.
+All model weights (AE, Discriminator, Q-network) are persisted per agent in Redis so state
+survives restarts. When the AI Decision Engine determines that an intrusion is present,
+the Intrusion Alert Engine is triggered, generating notifications and persisting alert records. </p>
 
 <p>Web Dashboard and Agent Management: The web-based dashboard is built with
 React.js, Tailwind CSS, nivo Charts, Axios, and Three.js for interactive visualization. It com-

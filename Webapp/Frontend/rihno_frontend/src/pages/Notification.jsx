@@ -39,8 +39,7 @@ const LEVEL_ACCENT_HEX = {
 
 const LAYER_TOOLTIPS = {
     statistical: 'Statistical: outlier detection on rolling network metrics.',
-    isolation_forest: 'Isolation Forest: tree-based anomaly score across feature space.',
-    autoencoder: 'Autoencoder: deep model reconstruction error on normal baseline.',
+    hybrid: 'Hybrid AI: Autoencoder + GAN + RL — learns normal patterns, adapts threshold dynamically. Activates after 200 samples.',
     network_analyzer: 'Network: graph-traffic anomaly across host relationships.',
 };
 
@@ -500,8 +499,7 @@ function AgentThreatCard({ agent }) {
                         <p className="font-black uppercase text-gray-700">Layer Scores</p>
                         {[
                             ['Statistical', 'statistical', layerStatus.statistical],
-                            ['Iso. Forest', 'isolation_forest', layerStatus.isolation_forest],
-                            ['Autoencoder', 'autoencoder', layerStatus.autoencoder],
+                            ['Hybrid AI', 'hybrid', layerStatus.hybrid],
                             ['Network', 'network_analyzer', layerStatus.network_analyzer],
                         ].map(([label, key, st]) => {
                             const info = layerInfo(key);
@@ -522,6 +520,12 @@ function AgentThreatCard({ agent }) {
                         <Stat label="Stream" value={agent.stream_length || 0} />
                         <Stat label="Alerts" value={recentAlerts.length} />
                         <Stat label="Last" value={agent.last_metric_ts ? new Date(agent.last_metric_ts).toLocaleTimeString() : '—'} />
+                        {layerStatus.hybrid && !layerStatus.hybrid.active && (
+                            <Stat label="Hybrid needs" value={`${layerStatus.hybrid.needed - (layerStatus.hybrid.samples || 0)} more`} />
+                        )}
+                        {layerStatus.hybrid?.active && (
+                            <Stat label="RL ε" value={(layerStatus.hybrid.rl_epsilon || 0).toFixed(3)} />
+                        )}
                     </div>
 
                     {recentAlerts.length > 0 && (

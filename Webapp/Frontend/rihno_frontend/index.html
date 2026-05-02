@@ -5,6 +5,26 @@
     <link rel="icon" type="image/svg+xml" href="/src/assets/rihno.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>rihno_frontend</title>
+    <!--
+      importmap: react + three.js stack loaded from CDN so the production
+      Rollup build can skip parsing ~200MB of source (fits Docker <2GB RAM).
+      React is included so that CDN fiber/drei share the same React instance.
+    -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react":                   "https://esm.sh/react@19.2.5",
+        "react/jsx-runtime":       "https://esm.sh/react@19.2.5/jsx-runtime",
+        "react/jsx-dev-runtime":   "https://esm.sh/react@19.2.5/jsx-dev-runtime",
+        "react-dom":               "https://esm.sh/react-dom@19.2.5",
+        "react-dom/client":        "https://esm.sh/react-dom@19.2.5/client",
+        "three":                   "https://esm.sh/three@0.182.0",
+        "three/":                  "https://unpkg.com/three@0.182.0/",
+        "@react-three/fiber":      "https://esm.sh/@react-three/fiber@9.6.1?external=react,react-dom,three",
+        "@react-three/drei":       "https://esm.sh/@react-three/drei@10.7.7?external=react,react-dom,three,@react-three/fiber"
+      }
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>

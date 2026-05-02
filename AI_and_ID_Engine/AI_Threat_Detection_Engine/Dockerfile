@@ -19,8 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ── Application code ────────────────────────────────────────────────────────
 COPY feature_extractor.py \
      statistical_detector.py \
-     isolation_forest_detector.py \
-     autoencoder_detector.py \
+     hybrid_detector.py \
      network_analyzer.py \
      ensemble_scorer.py \
      redis_store.py \
