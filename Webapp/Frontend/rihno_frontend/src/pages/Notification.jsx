@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { useAuth } from "react-oidc-context";
 import { backendConfig } from "../authConfig.js";
@@ -73,6 +73,8 @@ function Notification() {
 
     const [loading, setLoading] = useState(true);
     const [fetchErrors, setFetchErrors] = useState([]);
+    const [sseConnected, setSseConnected] = useState(false);
+    const esRef = useRef(null);
 
     const showMsg = (kind, text) => {
         setActionMsg({ kind, text });
@@ -93,12 +95,10 @@ function Notification() {
             });
 
         try {
-            const [agentsRes, statusRes, ipRes, aiRes, aiSumRes, recRes] = await Promise.all([
+            const [agentsRes, statusRes, ipRes, recRes] = await Promise.all([
                 safeGet('devices', api('api/list_all_devices'), { email }, []),
                 safeGet('agent_status', `${backendConfig.dealerURL}/agents/status`, { email }, []),
                 safeGet('ip_threats', api('api/ip_threats'), { email }, { data: [] }),
-                safeGet('ai_threats', api('api/notify/threats'), { email }, null),
-                safeGet('ai_summary', api('api/ai/threat_summary'), { email }, null),
                 safeGet('recipients', api('api/notify/recipients'), { email }, null),
             ]);
 
@@ -109,9 +109,6 @@ function Notification() {
             setAgentStatuses(map);
 
             setIpThreatData(ipRes.data?.data || []);
-
-            if (aiRes.data) setAiThreats(aiRes.data);
-            if (aiSumRes.data) setAiSummary(aiSumRes.data);
 
             if (recRes.data) {
                 setRecipients(recRes.data.recipients || []);
@@ -139,6 +136,63 @@ function Notification() {
         const id = setInterval(fetchCore, 10000);
         return () => clearInterval(id);
     }, [fetchCore]);
+
+    // ── SSE — real-time threat stream ────────────────────────────────────
+    useEffect(() => {
+        if (!email) return;
+
+        const url = `${backendConfig.backendURL}api/ai/threat_stream?email=${encodeURIComponent(email)}`;
+        const es = new EventSource(url);
+        esRef.current = es;
+
+        es.addEventListener('threat', (evt) => {
+            try {
+                const agent = JSON.parse(evt.data);
+                setSseConnected(true);
+                setLoading(false);
+
+                setAiSummary(prev => {
+                    const agents = [...(prev.agents || [])];
+                    const idx = agents.findIndex(a => a.agent_name === agent.agent_name);
+                    const updated = {
+                        agent_id: agent.agent_id,
+                        agent_name: agent.agent_name,
+                        email: agent.email,
+                        last_assessment: {
+                            threat_level: agent.threat_level,
+                            final_score: agent.final_score,
+                            timestamp: agent.timestamp,
+                            layer_contributions: agent.layer_contributions || {},
+                            anomalous_features: agent.anomalous_features || [],
+                            critical_alerts: agent.critical_alerts || [],
+                            network_alerts: agent.network_alerts || [],
+                            system_status: agent.system_status || {},
+                        },
+                        stream_length: agent.stream_length || 0,
+                        last_metric_ts: agent.timestamp || agent.last_metric_ts,
+                        status: {
+                            samples_processed: agent.system_status?.total_samples || 0,
+                            layers: { hybrid: { active: agent.system_status?.hybrid_active } },
+                        },
+                        recent_alerts: idx >= 0 ? (agents[idx].recent_alerts || []) : [],
+                    };
+                    if (idx >= 0) agents[idx] = updated;
+                    else agents.push(updated);
+                    return { ...prev, agents, agent_count: agents.length };
+                });
+            } catch (e) {
+                console.warn('[SSE] parse error', e);
+            }
+        });
+
+        es.onerror = () => setSseConnected(false);
+
+        return () => {
+            es.close();
+            esRef.current = null;
+            setSseConnected(false);
+        };
+    }, [email]);
 
     // ── Recipient Actions ────────────────────────────────────────────────
 
@@ -303,6 +357,13 @@ function Notification() {
                     </span>
                 </h1>
 
+                <div className="flex items-center gap-2 mb-2">
+                    <span className={`w-2.5 h-2.5 rounded-full border-2 border-black ${sseConnected ? 'bg-[#CEFFBC] animate-pulse' : 'bg-gray-300'}`} />
+                    <span className="font-mono text-xs font-bold uppercase text-gray-500">
+                        {sseConnected ? 'Live' : 'Connecting…'}
+                    </span>
+                </div>
+
                 <div className="flex flex-wrap justify-center gap-3 sm:gap-4 mt-3 sm:mt-4">
                     <TabBtn active={activeTab === 'threats'} onClick={() => setActiveTab('threats')} icon={<BrainCircuit size={20} />} color="bg-[#FFECA0]">
                         AI Threats
@@ -340,7 +401,7 @@ function Notification() {
                 <div className="w-full max-w-5xl xl:max-w-6xl">
 
                     {activeTab === 'threats' && (
-                        <ThreatsView overallLevel={overallLevel} aiAgents={aiAgents} autoDetector={autoDetector} hasSummary={summaryAgents.length > 0} />
+                        <ThreatsView overallLevel={overallLevel} aiAgents={aiAgents} autoDetector={autoDetector} hasSummary={summaryAgents.length > 0} enrichedAgents={enrichedAgents} />
                     )}
 
                     {activeTab === 'agents' && (
@@ -388,9 +449,15 @@ function TabBtn({ active, onClick, icon, color, children }) {
 
 // ── Threats View (AI engine) ────────────────────────────────────────────
 
-function ThreatsView({ overallLevel, aiAgents, autoDetector, hasSummary }) {
+function ThreatsView({ overallLevel, aiAgents, autoDetector, hasSummary, enrichedAgents }) {
     const levelLabel = (overallLevel || 'normal').toUpperCase();
     const isCritical = THREAT_RANK[overallLevel] >= 3;
+
+    const agentStatusMap = useMemo(() => {
+        const m = {};
+        for (const a of (enrichedAgents || [])) m[a.DeviceName] = a.DisplayStatus;
+        return m;
+    }, [enrichedAgents]);
 
     return (
         <div className="space-y-4 sm:space-y-6">
@@ -436,7 +503,7 @@ function ThreatsView({ overallLevel, aiAgents, autoDetector, hasSummary }) {
                         })
                         .map((t, idx) => (
                             hasSummary
-                                ? <AgentThreatCard key={idx} agent={t} />
+                                ? <AgentThreatCard key={idx} agent={t} dealerStatus={agentStatusMap[t.agent_name]} />
                                 : <LegacyThreatCard key={idx} t={t} />
                         ))}
                 </div>
@@ -460,7 +527,7 @@ function AiSummaryBlock({ summary }) {
     );
 }
 
-function AgentThreatCard({ agent }) {
+function AgentThreatCard({ agent, dealerStatus }) {
     const last = agent.last_assessment || {};
     const level = last.threat_level || 'normal';
     const layers = last.layer_contributions || {};
@@ -470,6 +537,12 @@ function AgentThreatCard({ agent }) {
     const layerStatus = status.layers || {};
     const aiSummary = agent.ai_summary || last.ai_summary || '';
     const headline = aiHeadline(aiSummary);
+
+    const isOffline = dealerStatus && dealerStatus !== 'Online';
+    const lastMetricAge = agent.last_metric_ts
+        ? Math.floor((Date.now() - new Date(agent.last_metric_ts).getTime()) / 1000)
+        : null;
+    const isStale = isOffline || (lastMetricAge !== null && lastMetricAge > 120);
 
     const getLayerInfo = (lyr) => {
         const v = layers[lyr];
@@ -560,10 +633,16 @@ function AgentThreatCard({ agent }) {
 
                 {/* Metrics row */}
                 <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t-2 border-dashed border-gray-200">
-                    <Stat label="Samples" value={samples.toLocaleString()} />
-                    <Stat label="Stream" value={(agent.stream_length || 0).toLocaleString()} />
+                    <Stat label="Samples" value={samples.toLocaleString()} stale={isStale} />
+                    <Stat label="Stream" value={(agent.stream_length || 0).toLocaleString()} stale={isStale} />
                     <Stat label="Last seen" value={agent.last_metric_ts ? new Date(agent.last_metric_ts).toLocaleTimeString() : '—'} />
                 </div>
+                {isStale && (
+                    <div className="mt-2 flex items-center gap-2 px-2 py-1 border-2 border-black bg-gray-200 font-mono text-[10px] font-black uppercase text-gray-600">
+                        <span className="w-2 h-2 rounded-full bg-gray-500 shrink-0" />
+                        {isOffline ? `Agent ${dealerStatus?.toUpperCase() || 'OFFLINE'} — metrics frozen` : 'No data >2 min — metrics frozen'}
+                    </div>
+                )}
             </div>
 
             {/* ── Recent Detections ── */}
@@ -614,11 +693,11 @@ function AgentThreatCard({ agent }) {
 }
 
 
-function Stat({ label, value }) {
+function Stat({ label, value, stale }) {
     return (
         <div className="flex flex-col">
             <span className="text-[10px] uppercase font-bold text-gray-500">{label}</span>
-            <span className="font-black truncate">{value}</span>
+            <span className={`font-black truncate ${stale ? 'text-gray-400' : ''}`}>{value}</span>
         </div>
     );
 }

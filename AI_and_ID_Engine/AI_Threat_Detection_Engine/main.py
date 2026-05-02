@@ -117,11 +117,11 @@ class IDSEngine:
             self._pipelines[key] = pipeline
         return self._pipelines[key]
 
-    def process(self, metric_json: dict) -> Dict:
+    def process(self, metric_json: dict, _already_stored: bool = False) -> Dict:
         """
         Process a single metric reading.
         1. Route to agent's isolated pipeline
-        2. Store metric in Redis stream
+        2. Store metric in Redis stream (skipped if Go dealer already wrote it)
         3. Run detection
         4. Store alerts if threat detected
         5. Periodically save models
@@ -131,9 +131,12 @@ class IDSEngine:
 
         pipeline = self._get_pipeline(email, agent_name)
 
-        # Store raw metric in Redis (if not already pushed by Go dealer)
-        # The Go dealer writes to the stream; this is a fallback for direct API usage
-        self.store.push_metric(email, agent_name, metric_json)
+        # Only push when called from the direct HTTP ingest path.
+        # When called via process_from_stream() the Go dealer already wrote
+        # the entry; pushing again creates a new stream ID that AutoDetector
+        # sees as "new" next tick → infinite re-processing loop.
+        if not _already_stored:
+            self.store.push_metric(email, agent_name, metric_json)
 
         features = extract_features(metric_json)
         net_features = extract_network_features(metric_json)
@@ -152,6 +155,21 @@ class IDSEngine:
             "critical_alerts": result.get("critical_alerts", []),
             "network_alerts": result.get("network_alerts", []),
             "network_patterns": result.get("network_patterns", []),
+            "system_status": result.get("system_status", {}),
+        })
+
+        self.store.publish_threat_event(email, agent_name, {
+            "agent_name": agent_name,
+            "agent_id": f"{email}:{agent_name}",
+            "email": email,
+            "threat_level": result.get("threat_level"),
+            "final_score": result.get("final_score"),
+            "timestamp": result.get("timestamp"),
+            "layer_contributions": result.get("layer_contributions", {}),
+            "anomalous_features": result.get("anomalous_features", []),
+            "critical_alerts": result.get("critical_alerts", []),
+            "network_alerts": result.get("network_alerts", []),
+            "stream_length": self.store.get_stream_length(email, agent_name),
             "system_status": result.get("system_status", {}),
         })
 
@@ -177,7 +195,7 @@ class IDSEngine:
         metric = self.store.get_latest_metric(email, agent_name)
         if not metric:
             return {"error": f"No metrics found for {email}:{agent_name}"}
-        return self.process(metric)
+        return self.process(metric, _already_stored=True)
 
     def get_agent_status(self, email: str, agent_name: str) -> Dict:
         pipeline = self._get_pipeline(email, agent_name)

@@ -202,9 +202,22 @@ app.delete('/api/delete', async (req, res) => {
 
         const response = await axios.delete(AWS_API_URL, {
             params: { email: email, device: device },
-        })
+        });
 
-        res.status(200).json(response.data);
+        const awsData = response.data;
+
+        // Best-effort: clean Redis streams, ML models, alerts, and AI engine pipeline.
+        // Non-fatal — if AI engine is down, AWS delete still succeeds.
+        if (device) {
+            axios.delete(
+                `${AI_ENGINE_URL}/agents/${encodeURIComponent(email)}/${encodeURIComponent(device)}`,
+                { timeout: 5000 }
+            ).catch(aiErr => {
+                console.warn('AI engine cleanup failed (non-fatal):', aiErr.message);
+            });
+        }
+
+        res.status(200).json(awsData);
 
     } catch (error) {
         // Log detailed error for you, send clean error to frontend
@@ -609,6 +622,30 @@ app.put('/api/notify/settings', async (req, res) => {
     } catch (error) {
         forwardAxiosError(error, res, 'Failed to update settings');
     }
+});
+
+// Real-time threat stream (SSE proxy to AI engine)
+app.get('/api/ai/threat_stream', (req, res) => {
+    const { email } = req.query;
+    if (badEmail(email, res)) return;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering in prod
+    res.flushHeaders();
+
+    axios.get(`${AI_ENGINE_URL}/threat_stream`, {
+        params: { email },
+        responseType: 'stream',
+        timeout: 0, // never timeout SSE connections
+    }).then(upstream => {
+        upstream.data.pipe(res);
+        req.on('close', () => upstream.data.destroy());
+    }).catch(err => {
+        console.warn('SSE upstream error:', err.message);
+        res.end();
+    });
 });
 
 // Test send

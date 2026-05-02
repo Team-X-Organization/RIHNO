@@ -197,6 +197,12 @@ class RedisStore:
         agent_id = self._agent_key(email, agent)
         self.redis.set(self._key(agent_id, "last_assessment"), json.dumps(result))
 
+    def publish_threat_event(self, email: str, agent: str, event: dict) -> None:
+        safe_email = email.replace(":", "_")
+        safe_agent = agent.replace(":", "_").replace(" ", "_")
+        channel = f"threat:{safe_email}:{safe_agent}"
+        self.redis.publish(channel, json.dumps(event))
+
     def get_last_assessment(self, email: str, agent: str) -> Optional[dict]:
         agent_id = self._agent_key(email, agent)
         data = self.redis.get(self._key(agent_id, "last_assessment"))

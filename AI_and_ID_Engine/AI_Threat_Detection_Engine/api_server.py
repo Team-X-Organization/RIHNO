@@ -13,6 +13,7 @@ Env vars:
     REDIS_PASS  (default: empty)
 """
 
+import json
 import logging
 import os
 import threading
@@ -22,6 +23,8 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
+import redis.asyncio as aioredis
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -309,6 +312,63 @@ async def force_retrain(email: str, agent_name: str):
 @app.get("/auto_detector/status")
 async def auto_detector_status():
     return auto_detector.status()
+
+
+# ── Real-Time Threat Stream (SSE) ────────────────────────────────────────────
+
+@app.get("/threat_stream")
+async def threat_stream(email: str = Query(..., description="Owner email")):
+    """
+    Server-Sent Events stream of threat assessments for a user's agents.
+    Sends an initial snapshot of all current assessments on connect,
+    then pushes events in real-time as the AI engine processes new metrics.
+    Each event has type 'threat' and JSON data matching the per-agent shape
+    from /threat_summary.
+    """
+    safe_owner = email.replace(":", "_")
+
+    async def generator():
+        # 1. Send current snapshot so frontend has data immediately on connect
+        snapshot = []
+        with engine_lock:
+            for agent_id in store.get_all_agents():
+                if ":" not in agent_id:
+                    continue
+                owner, agent_name = agent_id.split(":", 1)
+                if owner != safe_owner:
+                    continue
+                last = store.get_last_assessment(owner, agent_name)
+                latest_metric = store.get_latest_metric(owner, agent_name)
+                if last:
+                    snapshot.append({
+                        "agent_name": agent_name,
+                        "agent_id": agent_id,
+                        "email": email,
+                        **last,
+                        "stream_length": store.get_stream_length(owner, agent_name),
+                        "last_metric_ts": latest_metric.get("timestamp") if latest_metric else None,
+                    })
+        for snap in snapshot:
+            yield {"event": "threat", "data": json.dumps(snap)}
+
+        # 2. Subscribe to Redis pub/sub for live events
+        async_redis = aioredis.Redis(
+            host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB,
+            password=REDIS_PASS, decode_responses=False,
+            socket_timeout=None,
+        )
+        pubsub = async_redis.pubsub()
+        pattern = f"threat:{safe_owner}:*"
+        await pubsub.psubscribe(pattern)
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "pmessage":
+                    yield {"event": "threat", "data": message["data"].decode()}
+        finally:
+            await pubsub.punsubscribe(pattern)
+            await async_redis.aclose()
+
+    return EventSourceResponse(generator())
 
 
 # ── Threat Summary (per-user aggregation for frontend) ───────────────────────
