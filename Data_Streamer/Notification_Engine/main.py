@@ -18,7 +18,7 @@ Env:
 import logging
 import os
 import re
-from typing import Optional
+from typing import Dict, Optional
 
 import redis
 from fastapi import FastAPI, HTTPException
@@ -136,6 +136,7 @@ class RecipientUpdate(BaseModel):
 class SettingsIn(BaseModel):
     min_threat_level: Optional[str] = Field(None, pattern="^(low|medium|high|critical)$")
     mute_until: Optional[int] = None
+    agent_thresholds: Optional[Dict[str, str]] = None
 
 
 class TestIn(BaseModel):

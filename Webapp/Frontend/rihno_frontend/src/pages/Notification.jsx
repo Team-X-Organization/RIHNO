@@ -37,12 +37,6 @@ const LEVEL_ACCENT_HEX = {
     critical: '#FF6B6B',
 };
 
-const LAYER_TOOLTIPS = {
-    statistical: 'Statistical: outlier detection on rolling network metrics.',
-    hybrid: 'Hybrid AI: Autoencoder + GAN + RL — learns normal patterns, adapts threshold dynamically. Activates after 200 samples.',
-    network_analyzer: 'Network: graph-traffic anomaly across host relationships.',
-};
-
 // Pull a 1-line headline out of a multi-sentence Bedrock summary.
 function aiHeadline(text) {
     if (!text) return '';
@@ -121,7 +115,14 @@ function Notification() {
 
             if (recRes.data) {
                 setRecipients(recRes.data.recipients || []);
-                if (recRes.data.settings) setSettings(recRes.data.settings);
+                if (recRes.data.settings) {
+                    // Merge: preserve local agent_thresholds if server doesn't return them
+                    // (guards against polling overwriting per-agent overrides mid-session)
+                    setSettings(prev => ({
+                        ...recRes.data.settings,
+                        agent_thresholds: recRes.data.settings.agent_thresholds ?? prev.agent_thresholds,
+                    }));
+                }
             }
 
             setFetchErrors(failures);
@@ -220,6 +221,25 @@ function Notification() {
         try {
             await axios.put(api('api/notify/settings'), { min_threat_level: level }, { params: { email } });
             showMsg('ok', `Threshold set to ${level.toUpperCase()}.`);
+        } catch (err) {
+            showMsg('err', `Update failed: ${err.message}`);
+        }
+    };
+
+    const updateAgentThreshold = async (agentName, level) => {
+        // Compute inside functional setter to read latest state — avoids stale closure
+        // when two agents update rapidly (second would overwrite first otherwise).
+        let newThresholds;
+        setSettings(prev => {
+            const prevThresholds = prev.agent_thresholds || {};
+            newThresholds = level === null
+                ? Object.fromEntries(Object.entries(prevThresholds).filter(([k]) => k !== agentName))
+                : { ...prevThresholds, [agentName]: level };
+            return { ...prev, agent_thresholds: newThresholds };
+        });
+        try {
+            await axios.put(api('api/notify/settings'), { agent_thresholds: newThresholds }, { params: { email } });
+            showMsg('ok', level ? `${agentName} → ${level.toUpperCase()}.` : `${agentName} reset to global.`);
         } catch (err) {
             showMsg('err', `Update failed: ${err.message}`);
         }
@@ -342,7 +362,9 @@ function Notification() {
                             toggleRecipient={toggleRecipient}
                             sendTest={sendTest}
                             updateMinLevel={updateMinLevel}
+                            updateAgentThreshold={updateAgentThreshold}
                             actionLoading={actionLoading}
+                            agents={enrichedAgents}
                         />
                     )}
                 </div>
@@ -441,7 +463,6 @@ function AiSummaryBlock({ summary }) {
 function AgentThreatCard({ agent }) {
     const last = agent.last_assessment || {};
     const level = last.threat_level || 'normal';
-    const score = typeof last.final_score === 'number' ? last.final_score : 0;
     const layers = last.layer_contributions || {};
     const recentAlerts = agent.recent_alerts || [];
     const status = agent.status || {};
@@ -450,7 +471,7 @@ function AgentThreatCard({ agent }) {
     const aiSummary = agent.ai_summary || last.ai_summary || '';
     const headline = aiHeadline(aiSummary);
 
-    const layerInfo = (lyr) => {
+    const getLayerInfo = (lyr) => {
         const v = layers[lyr];
         if (!v || typeof v !== 'object') return { score: 0, contribution: 0, active: false };
         return {
@@ -460,112 +481,138 @@ function AgentThreatCard({ agent }) {
         };
     };
 
+    const hybridInfo = getLayerInfo('hybrid');
+    const hybridLS = layerStatus.hybrid || {};
+    const hybridActive = hybridInfo.active && hybridLS.active !== false;
+
+    // Use live hybrid score — avoids static final_score from backend
+    const score = hybridActive
+        ? hybridInfo.score
+        : (typeof last.final_score === 'number' ? last.final_score : 0);
+    const scorePct = Math.round(score * 100);
+
+    const warmupNeeded = !hybridActive && hybridLS.needed
+        ? Math.max(0, hybridLS.needed - (hybridLS.samples || samples || 0))
+        : 0;
+
+    const scoreBarColor =
+        THREAT_RANK[level] >= 3 ? 'bg-[#FF6B6B]' :
+        THREAT_RANK[level] >= 2 ? 'bg-[#FFECA0]' : 'bg-[#CEFFBC]';
+
     return (
         <div
-            className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000]"
+            className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000] flex flex-col"
             style={{ borderLeftWidth: '12px', borderLeftColor: LEVEL_ACCENT_HEX[level] }}
         >
+            {/* ── Header ── */}
             <div className={`p-4 border-b-4 border-black ${LEVEL_BG[level]} ${LEVEL_TEXT[level]}`}>
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                        <AlertTriangle size={24} className="shrink-0" />
+                        <AlertTriangle size={24} className="shrink-0 mt-0.5" />
                         <div className="min-w-0">
                             <h3 className="font-black uppercase text-lg sm:text-xl truncate">{agent.agent_name}</h3>
-                            <p className="font-mono text-xs uppercase opacity-80">{level}</p>
+                            <p className="font-mono text-xs uppercase opacity-80 mt-0.5">{level}</p>
                         </div>
                     </div>
-                    <span className="font-mono text-xs font-black uppercase px-2 py-1 border-2 border-black bg-white text-black shrink-0">
-                        Score {score.toFixed(3)}
-                    </span>
+                    <div className="shrink-0 text-right bg-black/20 border-2 border-black/40 px-3 py-1.5">
+                        <p className="font-mono text-[10px] uppercase opacity-70">Hybrid AI</p>
+                        <p className="font-black text-2xl leading-none mt-0.5">{scorePct}%</p>
+                    </div>
                 </div>
                 {headline && (
-                    <p className="mt-3 font-mono text-xs sm:text-sm font-bold leading-snug border-t-2 border-black/40 pt-2">
+                    <p className="mt-3 font-mono text-xs sm:text-sm font-bold leading-snug border-t-2 border-black/30 pt-2 opacity-90">
                         ▸ {headline}
                     </p>
                 )}
             </div>
 
-            <details className="p-4 font-mono text-xs sm:text-sm group">
-                <summary className="cursor-pointer font-black uppercase text-gray-700 select-none flex items-center justify-between hover:text-black">
-                    <span className="flex items-center gap-2">
-                        <BrainCircuit size={14} /> Details
+            {/* ── Hybrid AI Engine Block ── */}
+            <div className="p-4 border-b-4 border-black">
+                <div className="flex items-center justify-between mb-2">
+                    <span className="font-black uppercase text-xs flex items-center gap-1.5 text-gray-700">
+                        <BrainCircuit size={14} /> Hybrid AI Engine
                     </span>
-                    <span className="font-mono text-[10px] text-gray-500 group-open:hidden">expand ▼</span>
-                    <span className="font-mono text-[10px] text-gray-500 hidden group-open:inline">collapse ▲</span>
-                </summary>
+                    {hybridActive ? (
+                        <span className="px-2 py-0.5 border-2 border-black bg-[#CEFFBC] font-mono text-[10px] font-black uppercase">
+                            ACTIVE · RL ε {(hybridLS.rl_epsilon || 0).toFixed(3)}
+                        </span>
+                    ) : warmupNeeded > 0 ? (
+                        <span className="px-2 py-0.5 border-2 border-black bg-[#FFECA0] font-mono text-[10px] font-black uppercase">
+                            WARMUP — {warmupNeeded} more samples
+                        </span>
+                    ) : (
+                        <span className="px-2 py-0.5 border-2 border-black bg-gray-200 font-mono text-[10px] font-black uppercase">
+                            IDLE
+                        </span>
+                    )}
+                </div>
 
-                <div className="space-y-3 pt-3">
-                    <div className="space-y-2">
-                        <p className="font-black uppercase text-gray-700">Layer Scores</p>
-                        {[
-                            ['Statistical', 'statistical', layerStatus.statistical],
-                            ['Hybrid AI', 'hybrid', layerStatus.hybrid],
-                            ['Network', 'network_analyzer', layerStatus.network_analyzer],
-                        ].map(([label, key, st]) => {
-                            const info = layerInfo(key);
+                {/* Score bar */}
+                <div className="h-7 border-2 border-black bg-gray-100 relative overflow-hidden">
+                    <div
+                        className={`h-full transition-all duration-700 ${scoreBarColor}`}
+                        style={{ width: `${scorePct}%` }}
+                    />
+                    <span className="absolute inset-0 flex items-center justify-center font-black font-mono text-xs text-black">
+                        {scorePct}% threat confidence
+                    </span>
+                </div>
+
+                {/* Metrics row */}
+                <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t-2 border-dashed border-gray-200">
+                    <Stat label="Samples" value={samples.toLocaleString()} />
+                    <Stat label="Stream" value={(agent.stream_length || 0).toLocaleString()} />
+                    <Stat label="Last seen" value={agent.last_metric_ts ? new Date(agent.last_metric_ts).toLocaleTimeString() : '—'} />
+                </div>
+            </div>
+
+            {/* ── Recent Detections ── */}
+            {recentAlerts.length > 0 && (
+                <div className="p-4 border-b-4 border-black">
+                    <p className="font-black uppercase text-xs text-gray-600 mb-2 flex items-center gap-1.5">
+                        <Activity size={12} /> Recent Detections ({recentAlerts.length})
+                    </p>
+                    <ul className="space-y-1.5 max-h-32 overflow-auto">
+                        {recentAlerts.slice(0, 5).map((al, i) => {
+                            const alLevel = al.threat_level || 'low';
+                            const alScore = Math.round((al.final_score || 0) * 100);
                             return (
-                                <LayerBar
-                                    key={key}
-                                    label={label}
-                                    value={info.score}
-                                    active={info.active && (st?.active !== false)}
-                                    tooltip={LAYER_TOOLTIPS[key]}
-                                />
+                                <li key={i} className={`flex items-center gap-2 px-2 py-1 border-2 border-black ${LEVEL_BG[alLevel]} ${LEVEL_TEXT[alLevel]}`}>
+                                    <span className="font-black uppercase text-xs w-16 shrink-0">{alLevel}</span>
+                                    <div className="flex-1 h-2 bg-black/20 border border-black/30 overflow-hidden">
+                                        <div className="h-full bg-black/50" style={{ width: `${alScore}%` }} />
+                                    </div>
+                                    <span className="font-mono text-xs font-bold w-10 text-right shrink-0">{alScore}%</span>
+                                    <span className="font-mono text-[10px] opacity-70 shrink-0 hidden sm:block">
+                                        {al.timestamp ? new Date(al.timestamp).toLocaleTimeString() : '—'}
+                                    </span>
+                                </li>
                             );
                         })}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t-2 border-dashed border-gray-300">
-                        <Stat label="Samples" value={samples} />
-                        <Stat label="Stream" value={agent.stream_length || 0} />
-                        <Stat label="Alerts" value={recentAlerts.length} />
-                        <Stat label="Last" value={agent.last_metric_ts ? new Date(agent.last_metric_ts).toLocaleTimeString() : '—'} />
-                        {layerStatus.hybrid && !layerStatus.hybrid.active && (
-                            <Stat label="Hybrid needs" value={`${layerStatus.hybrid.needed - (layerStatus.hybrid.samples || 0)} more`} />
-                        )}
-                        {layerStatus.hybrid?.active && (
-                            <Stat label="RL ε" value={(layerStatus.hybrid.rl_epsilon || 0).toFixed(3)} />
-                        )}
-                    </div>
-
-                    {recentAlerts.length > 0 && (
-                        <div className="pt-2 border-t-2 border-dashed border-gray-300">
-                            <p className="font-black uppercase text-gray-700 mb-2">Recent Alerts</p>
-                            <ul className="space-y-1 max-h-40 overflow-auto">
-                                {recentAlerts.slice(0, 5).map((al, i) => (
-                                    <li key={i} className={`flex items-center justify-between gap-2 px-2 py-1 border-2 border-black ${LEVEL_BG[al.threat_level || 'low']} ${LEVEL_TEXT[al.threat_level || 'low']}`}>
-                                        <span className="font-black uppercase truncate">{al.threat_level}</span>
-                                        <span className="font-mono">{(al.final_score || 0).toFixed(2)}</span>
-                                        <span className="font-mono opacity-80 truncate">{al.timestamp ? new Date(al.timestamp).toLocaleTimeString() : '—'}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
-
-                    <AiSummaryBlock summary={aiSummary} />
+                    </ul>
                 </div>
-            </details>
+            )}
+
+            {/* ── AI Analyst (collapsible) ── */}
+            {aiSummary && (
+                <details className="p-4 group">
+                    <summary className="cursor-pointer font-black uppercase text-xs text-gray-600 select-none flex items-center justify-between hover:text-black">
+                        <span className="flex items-center gap-1.5">
+                            <BrainCircuit size={12} /> AI Analyst Summary
+                            <span className="font-mono font-normal normal-case text-[10px] text-gray-400 ml-1">AWS Nova Lite</span>
+                        </span>
+                        <span className="font-mono text-[10px] text-gray-500 group-open:hidden">expand ▼</span>
+                        <span className="font-mono text-[10px] text-gray-500 hidden group-open:inline">collapse ▲</span>
+                    </summary>
+                    <div className="mt-3 bg-[#f4f0ff] border-2 border-black p-3 text-xs leading-relaxed whitespace-pre-wrap font-sans">
+                        {aiSummary}
+                    </div>
+                </details>
+            )}
         </div>
     );
 }
 
-function LayerBar({ label, value, active, tooltip }) {
-    const pct = Math.round(value * 100);
-    return (
-        <div className="flex items-center gap-2" title={tooltip}>
-            <span className="w-24 shrink-0 font-bold uppercase cursor-help underline decoration-dotted decoration-gray-400 underline-offset-2">{label}</span>
-            <div className="flex-1 h-3 border-2 border-black bg-white relative">
-                <div
-                    className={`h-full ${active ? 'bg-black' : 'bg-gray-300'}`}
-                    style={{ width: `${pct}%` }}
-                />
-            </div>
-            <span className="w-10 text-right font-black">{pct}%</span>
-            {!active && <span className="font-mono text-[10px] uppercase text-gray-500">idle</span>}
-        </div>
-    );
-}
 
 function Stat({ label, value }) {
     return (
@@ -688,65 +735,148 @@ function IpThreatsView({ threatData }) {
                     <p className="font-mono text-lg sm:text-2xl font-black uppercase text-black">Zero IP Threats Detected.</p>
                 </div>
             ) : (
-                threatData.map((threat, idx) => (
-                    <div key={idx} className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000] hover:-translate-y-1 transition-all overflow-hidden flex flex-col md:flex-row">
-                        <div className="w-full md:w-40 lg:w-48 bg-[#FF6B6B] border-b-[3px] sm:border-b-4 md:border-b-0 md:border-r-[3px] md:sm:border-r-4 border-black p-4 sm:p-6 flex flex-col items-center justify-center text-white text-center">
-                            <AlertTriangle size={36} className="sm:w-10 sm:h-10 mb-2" />
-                            <p className="text-3xl sm:text-4xl font-black">{threat.threat_count || 0}</p>
-                            <p className="font-mono text-xs font-black uppercase tracking-widest mt-1">Incidents</p>
-                        </div>
-                        <div className="p-4 sm:p-6 flex-grow flex flex-col justify-between space-y-3 sm:space-y-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-                                <h3 className="text-xl sm:text-2xl md:text-3xl font-black uppercase flex items-center gap-2 sm:gap-3">
-                                    <Cpu size={22} className="sm:w-7 sm:h-7 text-gray-400" />
-                                    {threat.agent_name || threat.device_name || threat.DeviceName || threat.hostname || threat.interface || 'UNKNOWN AGENT'}
-                                </h3>
-                                {threat.threat_count > 0 && (
-                                    <span className="inline-block px-4 py-2 border-4 border-black bg-[#FFECA0] font-mono text-sm font-black text-black uppercase shadow-[4px_4px_0_#000]">
-                                        RISK: HIGH
-                                    </span>
-                                )}
-                            </div>
-
-                            <div className="bg-gray-100 p-4 border-2 border-black font-mono text-sm">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <p className="font-bold text-gray-500 uppercase text-xs mb-1">Source Scope</p>
-                                        <p className="font-black text-lg">{threat.interface || 'ALL NETWORKS'}</p>
-                                    </div>
-                                    {Array.isArray(threat.malicious_ips) && threat.malicious_ips.length > 0 && (
-                                        <div>
-                                            <p className="font-bold text-gray-500 uppercase text-xs mb-1">Top Offenders</p>
-                                            <div className="flex flex-wrap gap-2 mt-1">
-                                                {threat.malicious_ips.slice(0, 3).map((item, i) => (
-                                                    <span key={i} className="bg-black text-white px-2 py-1 text-xs">
-                                                        {typeof item === 'object' ? item.ip || JSON.stringify(item) : item}
-                                                    </span>
-                                                ))}
-                                                {threat.malicious_ips.length > 3 && (
-                                                    <span className="bg-gray-300 text-black px-2 py-1 text-xs font-bold border border-black">
-                                                        +{threat.malicious_ips.length - 3} MORE
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
+                threatData.map((threat, idx) => {
+                    // Go service returns threats_found + safe_ips (not malicious_ips)
+                    const maliciousIps = Array.isArray(threat.threats_found) ? threat.threats_found
+                        : Array.isArray(threat.malicious_ips) ? threat.malicious_ips : [];
+                    const safeIps = Array.isArray(threat.safe_ips) ? threat.safe_ips : [];
+                    const scanned = threat.total_ips_scanned || threat.ips_analyzed || threat.scanned_count
+                        || (maliciousIps.length + safeIps.length) || 0;
+                    const blocked = threat.blocked_ips || threat.blocked_count || 0;
+                    const threatRate = scanned > 0 ? ((maliciousIps.length / scanned) * 100).toFixed(1) : null;
+                    const agentLabel = threat.agent_name || threat.device_name || threat.DeviceName || threat.hostname || threat.interface || 'UNKNOWN AGENT';
+                    return (
+                        <div key={idx} className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000] overflow-hidden">
+                            {/* Agent header */}
+                            <div className="flex flex-col md:flex-row">
+                                <div className="w-full md:w-36 lg:w-44 bg-[#FF6B6B] border-b-[3px] md:border-b-0 md:border-r-4 border-black p-4 sm:p-6 flex flex-col items-center justify-center text-white text-center shrink-0">
+                                    <AlertTriangle size={32} className="mb-2" />
+                                    <p className="text-4xl font-black">{threat.threat_count || 0}</p>
+                                    <p className="font-mono text-xs font-black uppercase tracking-widest mt-1">Incidents</p>
+                                    {maliciousIps.length > 0 && (
+                                        <p className="font-mono text-xs mt-2 bg-black/20 px-2 py-0.5 font-bold">{maliciousIps.length} Malicious IPs</p>
                                     )}
+                                </div>
+                                <div className="p-4 sm:p-6 flex-grow space-y-4">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <h3 className="text-xl sm:text-2xl font-black uppercase flex items-center gap-2">
+                                            <Cpu size={20} className="text-gray-400 shrink-0" />
+                                            {agentLabel}
+                                        </h3>
+                                        <div className="flex flex-wrap gap-2 shrink-0">
+                                            {threat.threat_count > 0 && (
+                                                <span className="px-3 py-1.5 border-4 border-black bg-[#FFECA0] font-mono text-xs font-black uppercase shadow-[3px_3px_0_#000]">
+                                                    RISK: HIGH
+                                                </span>
+                                            )}
+                                            {blocked > 0 && (
+                                                <span className="px-3 py-1.5 border-4 border-black bg-[#CEFFBC] font-mono text-xs font-black uppercase shadow-[3px_3px_0_#000]">
+                                                    {blocked} Blocked
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Stats grid */}
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+                                        <div className="bg-[#FF6B6B]/10 border-2 border-black p-2 text-center">
+                                            <p className="text-[10px] uppercase font-bold text-gray-500">Malicious IPs</p>
+                                            <p className="text-xl font-black text-[#FF6B6B]">{maliciousIps.length}</p>
+                                        </div>
+                                        <div className="bg-[#CEFFBC]/40 border-2 border-black p-2 text-center">
+                                            <p className="text-[10px] uppercase font-bold text-gray-500">Safe IPs</p>
+                                            <p className="text-xl font-black">{safeIps.length}</p>
+                                        </div>
+                                        <div className="bg-gray-100 border-2 border-black p-2 text-center">
+                                            <p className="text-[10px] uppercase font-bold text-gray-500">Total Scanned</p>
+                                            <p className="text-xl font-black">{scanned > 0 ? scanned.toLocaleString() : '0'}</p>
+                                        </div>
+                                        <div className="bg-[#FFECA0]/60 border-2 border-black p-2 text-center">
+                                            <p className="text-[10px] uppercase font-bold text-gray-500">Threat Rate</p>
+                                            <p className="text-xl font-black">{scanned > 0 ? `${threatRate}%` : '—'}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Scope + network */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-sm">
+                                        <div className="border-2 border-black p-3 bg-gray-50">
+                                            <p className="text-[10px] uppercase font-bold text-gray-500 mb-1">Source Scope</p>
+                                            <p className="font-black">{threat.interface || 'ALL NETWORKS'}</p>
+                                        </div>
+                                        <div className="border-2 border-black p-3 bg-gray-50">
+                                            <p className="text-[10px] uppercase font-bold text-gray-500 mb-1">Network</p>
+                                            <p className="font-black">{threat.network || 'DEFAULT'}</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 text-xs font-mono font-bold text-gray-500 uppercase mt-2 pt-4 border-t-2 border-dashed border-gray-300">
-                                <p className="flex items-center gap-2">
+                            {/* Malicious IPs list */}
+                            {maliciousIps.length > 0 && (
+                                <details className="border-t-4 border-black group">
+                                    <summary className="p-3 sm:p-4 cursor-pointer font-black uppercase text-xs flex items-center justify-between bg-gray-50 hover:bg-gray-100 select-none">
+                                        <span className="flex items-center gap-2">
+                                            <ShieldAlert size={14} className="text-[#FF6B6B]" />
+                                            Malicious IP List ({maliciousIps.length})
+                                        </span>
+                                        <span className="font-mono text-[10px] text-gray-500 group-open:hidden">expand ▼</span>
+                                        <span className="font-mono text-[10px] text-gray-500 hidden group-open:inline">collapse ▲</span>
+                                    </summary>
+                                    <div className="p-3 sm:p-4 border-t-2 border-black bg-white">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-64 overflow-auto">
+                                            {maliciousIps.map((item, i) => {
+                                                const ip = typeof item === 'object' ? (item.ip || JSON.stringify(item)) : item;
+                                                const count = typeof item === 'object' ? item.count : null;
+                                                const severity = typeof item === 'object' ? item.severity : null;
+                                                return (
+                                                    <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 border-2 border-black bg-gray-50 font-mono text-xs">
+                                                        <span className="font-black truncate">{ip}</span>
+                                                        <div className="flex items-center gap-1.5 shrink-0">
+                                                            {count !== null && (
+                                                                <span className="bg-black text-white px-1.5 py-0.5 text-[10px] font-bold">×{count}</span>
+                                                            )}
+                                                            {severity && (
+                                                                <span className={`px-1.5 py-0.5 text-[10px] font-black uppercase border border-black ${LEVEL_BG[severity] || 'bg-gray-200'} ${LEVEL_TEXT[severity] || 'text-black'}`}>
+                                                                    {severity}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </details>
+                            )}
+
+                            {/* Footer */}
+                            <div className="px-4 py-3 border-t-2 border-dashed border-gray-300 flex flex-wrap gap-4 text-xs font-mono font-bold text-gray-500 uppercase bg-gray-50">
+                                <span className="flex items-center gap-1.5">
                                     <span className="w-2 h-2 rounded-full bg-black block" />
-                                    Last Activity: {threat.last_updated ? new Date(threat.last_updated).toLocaleString() : new Date().toLocaleString()}
-                                </p>
-                                <p className="flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-black block" />
-                                    Network: {threat.network || 'DEFAULT'}
-                                </p>
+                                    Last: {threat.last_updated ? new Date(threat.last_updated).toLocaleString() : new Date().toLocaleString()}
+                                </span>
+                                {threat.first_seen && (
+                                    <span className="flex items-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-gray-400 block" />
+                                        First: {new Date(threat.first_seen).toLocaleString()}
+                                    </span>
+                                )}
+                                {threat.port && (
+                                    <span className="flex items-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-gray-400 block" />
+                                        Port: {threat.port}
+                                    </span>
+                                )}
+                                {threat.protocol && (
+                                    <span className="flex items-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-gray-400 block" />
+                                        Proto: {threat.protocol}
+                                    </span>
+                                )}
                             </div>
                         </div>
-                    </div>
-                ))
+                    );
+                })
             )}
         </div>
     );
@@ -757,7 +887,7 @@ function IpThreatsView({ threatData }) {
 function RecipientsView({
     recipients, settings, recipientForm, setRecipientForm,
     addRecipient, deleteRecipient, toggleRecipient, sendTest,
-    updateMinLevel, actionLoading,
+    updateMinLevel, updateAgentThreshold, actionLoading, agents,
 }) {
     return (
         <div className="space-y-6">
@@ -811,13 +941,13 @@ function RecipientsView({
                 </div>
             </form>
 
-            {/* Threshold control */}
+            {/* Global threshold control */}
             <div className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000] p-4 sm:p-6 space-y-3">
                 <h3 className="font-black uppercase text-lg sm:text-xl flex items-center gap-2">
-                    <SlidersHorizontal size={22} /> Notify Threshold
+                    <SlidersHorizontal size={22} /> Global Notify Threshold
                 </h3>
                 <p className="font-mono text-xs sm:text-sm text-gray-600 uppercase font-bold">
-                    Only fire alerts at this level or above.
+                    Default for all agents — overridden per-agent below.
                 </p>
                 <div className="flex flex-wrap gap-2">
                     {THREAT_LEVELS.map(lvl => (
@@ -834,6 +964,66 @@ function RecipientsView({
                     ))}
                 </div>
             </div>
+
+            {/* Per-agent threshold overrides */}
+            {agents && agents.length > 0 && (
+                <div className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000] p-4 sm:p-6 space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                        <h3 className="font-black uppercase text-lg sm:text-xl flex items-center gap-2">
+                            <Server size={22} /> Per-Agent Thresholds
+                        </h3>
+                        <span className="font-mono text-xs text-gray-500 uppercase font-bold border-2 border-gray-300 px-2 py-1">
+                            Global default: {settings.min_threat_level?.toUpperCase()}
+                        </span>
+                    </div>
+                    <p className="font-mono text-xs text-gray-600 uppercase font-bold">
+                        Override alert sensitivity per agent. Custom badge = overridden.
+                    </p>
+                    <div className="space-y-2">
+                        {agents.map((agent, idx) => {
+                            const agentName = agent.DeviceName;
+                            const override = settings.agent_thresholds?.[agentName];
+                            const effective = override || settings.min_threat_level;
+                            return (
+                                <div key={agentName || idx} className="border-2 border-black p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${agent.DisplayStatus === 'Online' ? 'bg-[#CEFFBC] border-2 border-black' : agent.DisplayStatus === 'Maintenance' ? 'bg-[#7EA0FD] border-2 border-black' : 'bg-[#FF6B6B] border-2 border-black'}`} />
+                                        <span className="font-black uppercase truncate text-sm">{agentName}</span>
+                                        <span className="font-mono text-[10px] text-gray-500 uppercase hidden sm:inline">{agent.DisplayStatus}</span>
+                                        {override ? (
+                                            <span className="text-[10px] font-mono font-black bg-[#7EA0FD] text-white px-1.5 py-0.5 border border-black uppercase shrink-0">CUSTOM</span>
+                                        ) : (
+                                            <span className="text-[10px] font-mono font-bold bg-gray-200 text-gray-600 px-1.5 py-0.5 border border-gray-300 uppercase shrink-0">GLOBAL</span>
+                                        )}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                        {THREAT_LEVELS.map(lvl => (
+                                            <button
+                                                key={lvl}
+                                                onClick={() => updateAgentThreshold(agentName, lvl)}
+                                                className={`px-3 py-1 border-2 border-black font-mono font-black uppercase text-xs shadow-[2px_2px_0_#000] transition-all hover:-translate-y-0.5
+                                                    ${effective === lvl
+                                                        ? `${LEVEL_BG[lvl]} ${LEVEL_TEXT[lvl]}`
+                                                        : 'bg-white text-black'}`}
+                                            >
+                                                {lvl}
+                                            </button>
+                                        ))}
+                                        {override && (
+                                            <button
+                                                onClick={() => updateAgentThreshold(agentName, null)}
+                                                className="px-3 py-1 border-2 border-black bg-white text-gray-500 font-mono font-black uppercase text-xs shadow-[2px_2px_0_#000] hover:-translate-y-0.5 transition-all"
+                                            >
+                                                ↺ Reset
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Recipients list */}
             <div className="border-[3px] sm:border-4 border-black bg-white shadow-[5px_5px_0_#000] sm:shadow-[8px_8px_0_#000]">

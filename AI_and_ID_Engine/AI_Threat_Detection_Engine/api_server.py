@@ -250,8 +250,7 @@ async def models_status():
     Returned per pipeline:
       sample_count, last_saved_at,
       hybrid {trained, train_count, last_trained_at, age_seconds, buffer_size,
-              threshold, threshold_multiplier, rl_epsilon},
-      statistical {samples}
+              threshold, threshold_multiplier, rl_epsilon}
     """
     now = datetime.utcnow().timestamp()
     rows = []
@@ -275,9 +274,6 @@ async def models_status():
                     "rl_epsilon": h.rl_epsilon,
                     "min_samples": h.MIN_SAMPLES,
                     "retrain_interval": h.RETRAIN_INTERVAL,
-                },
-                "statistical": {
-                    "samples": pipeline.statistical.normalizer.n,
                 },
             })
     return {

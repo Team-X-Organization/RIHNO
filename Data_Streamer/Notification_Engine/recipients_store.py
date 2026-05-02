@@ -115,13 +115,26 @@ class RecipientsStore:
 
     def get_settings(self, email: str) -> Dict:
         raw = self.redis.hgetall(self._skey(email))
-        return {
+        settings: Dict = {
             "min_threat_level": raw.get("min_threat_level", "medium"),
             "mute_until": int(raw.get("mute_until", 0) or 0),
         }
+        if "agent_thresholds" in raw:
+            try:
+                settings["agent_thresholds"] = json.loads(raw["agent_thresholds"])
+            except (json.JSONDecodeError, TypeError):
+                settings["agent_thresholds"] = {}
+        return settings
 
     def set_settings(self, email: str, updates: Dict) -> Dict:
-        clean = {k: str(v) for k, v in updates.items() if v is not None}
+        clean: Dict = {}
+        for k, v in updates.items():
+            if v is None:
+                continue
+            if k == "agent_thresholds":
+                clean[k] = json.dumps(v)
+            else:
+                clean[k] = str(v)
         if clean:
             self.redis.hset(self._skey(email), mapping=clean)
         return self.get_settings(email)

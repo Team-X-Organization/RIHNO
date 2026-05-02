@@ -26,7 +26,6 @@ from feature_extractor import (
     extract_features, extract_network_features,
     extract_metadata, make_agent_key, ALL_FEATURES,
 )
-from statistical_detector import StatisticalDetector
 from hybrid_detector import HybridDetector
 from network_analyzer import NetworkAnalyzer
 from ensemble_scorer import EnsembleScorer
@@ -40,7 +39,7 @@ logger = logging.getLogger(__name__)
 class AgentPipeline:
     """
     Isolated detection pipeline for a single agent.
-    Each agent has its own normalizer, hybrid detector, and network analyzer.
+    Each agent has its own hybrid detector (with internal scaler) and network analyzer.
     """
 
     def __init__(self, email: str, agent_name: str):
@@ -49,7 +48,6 @@ class AgentPipeline:
         self.agent_key = make_agent_key(email, agent_name)
 
         n_features = len(ALL_FEATURES)
-        self.statistical = StatisticalDetector(z_threshold=3.0)
         self.hybrid = HybridDetector(input_dim=n_features)
         self.hybrid.agent_label = self.agent_key
         self.network = NetworkAnalyzer()
@@ -58,22 +56,19 @@ class AgentPipeline:
         self.last_saved_at: float = 0.0
 
     def process(self, features, net_features, metadata) -> Dict:
-        """Run all detection layers and return ensemble result."""
+        """Run Hybrid AI + network layers and return ensemble result."""
         self.sample_count += 1
 
-        self.statistical.update(features)
         self.hybrid.add_sample(features)
 
-        stat_result = self.statistical.detect(features)
         hybrid_result = self.hybrid.detect(features)
         net_result = self.network.analyze(net_features)
 
-        result = self.ensemble.score(stat_result, hybrid_result, net_result, metadata)
+        result = self.ensemble.score(hybrid_result, net_result, metadata)
 
         result["system_status"] = {
             "agent_key": self.agent_key,
             "total_samples": self.sample_count,
-            "statistical_active": True,
             "hybrid_active": self.hybrid.is_active,
             "hybrid_samples_needed": max(0, self.hybrid.MIN_SAMPLES - len(self.hybrid.training_data)),
             "hybrid_train_count": self.hybrid.train_count,
@@ -81,10 +76,8 @@ class AgentPipeline:
         return result
 
     def save_to_redis(self, store: RedisStore):
-        """Persist all model state to Redis."""
+        """Persist hybrid model state to Redis."""
         e, a = self.email, self.agent_name
-        norm = self.statistical.normalizer
-        store.save_normalizer(e, a, norm.n, norm.mean, norm.M2, norm.min_vals, norm.max_vals)
         if self.hybrid.training_data:
             store.save_model_state(e, a, "hybrid", self.hybrid.serialize())
         self.last_saved_at = time.time()
@@ -94,20 +87,12 @@ class AgentPipeline:
         )
 
     def load_from_redis(self, store: RedisStore):
-        """Restore model state from Redis."""
+        """Restore hybrid model state from Redis."""
         e, a = self.email, self.agent_name
-        norm_data = store.load_normalizer(e, a)
-        if norm_data:
-            n = self.statistical.normalizer
-            n.n = norm_data["n"]
-            n.mean = norm_data["mean"]
-            n.M2 = norm_data["M2"]
-            n.min_vals = norm_data["min_vals"]
-            n.max_vals = norm_data["max_vals"]
-            self.sample_count = n.n
         hybrid_data = store.load_model_state(e, a, "hybrid")
         if hybrid_data:
             self.hybrid.deserialize(hybrid_data)
+            self.sample_count = len(self.hybrid.training_data)
 
 
 # ── Multi-Agent Engine ───────────────────────────────────────────────────────
@@ -204,7 +189,6 @@ class IDSEngine:
             "agent_name": agent_name,
             "samples_processed": pipeline.sample_count,
             "layers": {
-                "statistical": {"active": True},
                 "hybrid": {
                     "active": h.is_active,
                     "samples": len(h.training_data),
@@ -214,7 +198,6 @@ class IDSEngine:
                     "threshold_multiplier": round(h._threshold_multiplier, 4),
                     "rl_epsilon": round(h.rl_epsilon, 4),
                 },
-                "network_analyzer": {"active": True},
             },
             "redis": summary,
         }
