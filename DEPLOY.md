@@ -58,7 +58,9 @@ docker run -d --name my_rihno_ip_threat -p 8888:8888 \
   -e KAFKA_BROKER=my_rihno_kafka:9092 \
   --network rihno-network rihno_ip_threat
 
-# AI Threat Detection Engine (Zero-Day)
+# AI Threat Detection Engine (Zero-Day) — Hybrid AE+GAN+RL model
+# Model activates per-agent after 200 datapoints; retrains every 50 new samples.
+# Weights (AE, Discriminator, Q-net) stored in Redis under ids:{email}:{agent}:model:hybrid
 cd AI_and_ID_Engine/AI_Threat_Detection_Engine
 docker build -t rihno_ai_engine .
 docker run -d --name my_rihno_ai_engine -p 4050:4050 \
@@ -156,8 +158,32 @@ THREAT_API_URL=http://my_rihno_ip_threat:8888/api/scans
 | http://localhost:5050/api/ai/status     | Backend → AI engine |
 | http://localhost:5050/api/notify/threats?email=you@x.com | Backend → Notify engine |
 | http://localhost:4050/health            | AI engine direct |
+| http://localhost:4050/models/status     | Hybrid model freshness (buffer size, threshold, RL ε) |
+| http://localhost:4050/auto_detector/status | Auto-detector thread health |
 | http://localhost:5060/health            | Notify engine direct |
 | http://localhost:8888/api/scans         | IP threat engine direct |
 
 If `/api/ai/status` returns `502/timeout`, backend is not on `rihno-network`
 or `my_rihno_ai_engine` container is not running.
+
+## AI model lifecycle
+
+Detection layers per agent:
+
+| Layer | Type | Activates | Retrains |
+|-------|------|-----------|----------|
+| Statistical | Z-score + rules | sample 1 | every sample |
+| **Hybrid AE+GAN+RL** | PyTorch neural net | 200 samples | every 50 new samples |
+| Network Analyzer | Rule-based | sample 1 | every snapshot |
+
+Ensemble weights: Statistical 35% · Hybrid 45% · Network 20%.
+
+Force retrain an agent manually:
+```bash
+curl -X POST http://localhost:4050/models/retrain/{email}/{agent_name}
+```
+
+Inspect hybrid model state (buffer size, threshold, RL epsilon, train count):
+```bash
+curl http://localhost:4050/models/status
+```
