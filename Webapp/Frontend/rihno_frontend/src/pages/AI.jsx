@@ -27,7 +27,7 @@ function CopyButton({ text }) {
     );
 }
 
-const AI_API_URL = import.meta.env.VITE_AI_API_URL || 'http://localhost:8001';
+const AI_API_URL = import.meta.env.VITE_AI_API_URL || 'http://98.95.26.167:8001';
 
 const KNOWN_MODELS = [
     { alias: 'claude-3.5-sonnet', label: 'Claude 3.5 Sonnet', fullId: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0' },
