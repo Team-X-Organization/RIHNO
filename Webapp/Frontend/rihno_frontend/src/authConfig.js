@@ -12,5 +12,5 @@ export const cognitoConfig = {
 export const backendConfig = {
     // Added the VITE_ prefix here
     backendURL: import.meta.env.VITE_BACKEND_URL,
-    dealerURL: import.meta.env.VITE_DEALER_URL || 'http://98.95.26.167:8000',
+    dealerURL: import.meta.env.VITE_DEALER_URL || 'https://rihnobackend.duckdns.org/api/rhino',
 }

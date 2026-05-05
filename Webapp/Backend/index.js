@@ -26,9 +26,9 @@ const NOTIFY_ENGINE_URL = process.env.NOTIFY_ENGINE_URL || 'http://my_rihno_noti
 
 // CORS — allow specific origins via FRONTEND_URL (comma-separated). In dev,
 // fall back to permissive so the Vite dev server still works.
-const allowedOrigins = (process.env.FRONTEND_URL || '')
+const allowedOrigins = (process.env.FRONTEND_URL || 'https://main.d3fxc2lgci3sbw.amplifyapp.com')
     .split(',')
-    .map(s => s.trim())
+    .map(s => s.trim().replace(/\/$/, ''))
     .filter(Boolean);
 
 app.use(cors({
